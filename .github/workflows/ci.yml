@@ -36,6 +36,9 @@ jobs:
       - name: Install test tooling
         run: python -m pip install --upgrade pip ".[test]"
 
+      - name: Run lint
+        run: python -m ruff check .
+
       - name: Run pytest suite
         run: python -m pytest -q
 

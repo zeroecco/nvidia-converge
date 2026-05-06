@@ -13,7 +13,7 @@ authors = [{ name = "nvidia-converge contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
-test = ["jsonschema>=4", "pytest>=8"]
+test = ["jsonschema>=4", "pytest>=8", "ruff>=0.4"]
 
 [project.scripts]
 nvidia-converge = "nvidia_converge.cli:main"
@@ -23,3 +23,6 @@ include = ["nvidia_converge*"]
 
 [tool.setuptools.package-data]
 nvidia_converge = ["schemas/*.schema.json"]
+
+[tool.ruff]
+target-version = "py310"
