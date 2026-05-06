@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -90,12 +91,23 @@ def _load_commands(value: Any) -> list[list[str]]:
 
 
 def _allowed_rollback_command(command: list[str]) -> bool:
-    return (
-        command[:3] == ["apt-get", "install", "-y"]
-        or command[:3] == ["dnf", "downgrade", "-y"]
-        or command[:3] == ["yum", "downgrade", "-y"]
-        or command[:4] == ["zypper", "--non-interactive", "install", "--oldpackage"]
-    )
+    if command[:3] in (["apt-get", "install", "-y"], ["dnf", "downgrade", "-y"], ["yum", "downgrade", "-y"]):
+        return _valid_package_specs(command[3:])
+    if command[:4] == ["zypper", "--non-interactive", "install", "--oldpackage"]:
+        return _valid_package_specs(command[4:])
+    return False
+
+
+def _valid_package_specs(specs: list[str]) -> bool:
+    if not specs:
+        return False
+    return all(_valid_package_spec(spec) for spec in specs)
+
+
+def _valid_package_spec(spec: str) -> bool:
+    if spec.startswith("-"):
+        return False
+    return re.match(r"^[A-Za-z0-9][A-Za-z0-9.+_:-]*(?:=[A-Za-z0-9][A-Za-z0-9.+:~_-]*)?$", spec) is not None
 
 
 def _required_string(value: Any, name: str) -> str:

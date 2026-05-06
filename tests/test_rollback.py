@@ -109,3 +109,23 @@ def test_load_snapshot_rejects_unsupported_command(tmp_path):
     )
     with pytest.raises(RollbackSnapshotError, match="not a supported rollback command"):
         load_snapshot(str(path))
+
+
+def test_load_snapshot_rejects_rollback_option_operand(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps({"packages": [], "kernel": "6.8.0", "commands": [["apt-get", "install", "-y", "-o", "Dpkg::Options::=--force-confold"]]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RollbackSnapshotError, match="not a supported rollback command"):
+        load_snapshot(str(path))
+
+
+def test_load_snapshot_rejects_empty_rollback_command_specs(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps({"packages": [], "kernel": "6.8.0", "commands": [["dnf", "downgrade", "-y"]]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RollbackSnapshotError, match="not a supported rollback command"):
+        load_snapshot(str(path))
