@@ -2,6 +2,7 @@ import json
 import os
 
 from nvidia_converge.cli import _install_status, main
+from nvidia_converge.human import render_human
 from nvidia_converge.models import CommandResult, DesiredState, Report, Verification
 
 
@@ -178,3 +179,28 @@ def test_install_status_passes_when_commands_and_checks_pass():
         verification=[Verification("nvidia-smi", True)],
     )
     assert _install_status(report) == 0
+
+
+def test_human_output_includes_failed_command_stderr():
+    report = Report(
+        "1.0",
+        "2026-05-06T00:00:00+00:00",
+        DesiredState(),
+        command_results=[CommandResult(["apt-get", "install"], 100, stderr="package not found\nmore detail")],
+    )
+    output = render_human("install", report, apply=True)
+    assert "- fail: apt-get install" in output
+    assert "  package not found" in output
+    assert "more detail" not in output
+
+
+def test_human_output_includes_failed_command_stdout_fallback():
+    report = Report(
+        "1.0",
+        "2026-05-06T00:00:00+00:00",
+        DesiredState(),
+        command_results=[CommandResult(["zypper", "install"], 4, stdout="solver failed")],
+    )
+    output = render_human("install", report, apply=True)
+    assert "- fail: zypper install" in output
+    assert "  solver failed" in output
