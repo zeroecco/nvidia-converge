@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         report.verification = verify_stack(desired, runner, post_audit)
         report.sbom = sbom_from_audit(post_audit)
         emit_report(args.command, report, out_path, json_stdout, apply_changes)
-        return 0 if all(v.ok for v in report.verification) and all(f.severity.value != "error" for f in report.findings) else 2
+        return _install_status(report)
 
     if args.command == "verify":
         runner.results = []
@@ -167,6 +167,13 @@ def _requires_root(command: str) -> bool:
 def _status_from_results(results: list[CommandResult]) -> int:
     failed = [result for result in results if result.returncode not in (0, None)]
     return 2 if failed else 0
+
+
+def _install_status(report: Report) -> int:
+    commands_ok = _status_from_results(report.command_results) == 0
+    verification_ok = all(check.ok for check in report.verification)
+    findings_ok = all(finding.severity.value != "error" for finding in report.findings)
+    return 0 if commands_ok and verification_ok and findings_ok else 2
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 import json
 import os
 
-from nvidia_converge.cli import main
+from nvidia_converge.cli import _install_status, main
+from nvidia_converge.models import CommandResult, DesiredState, Report, Verification
 
 
 def test_version_flag(capsys):
@@ -155,3 +156,25 @@ def test_install_is_dry_run_without_apply(tmp_path):
     assert all(result.get("reason") == "dry-run" for result in skipped)
     assert report["rollback"]["path"] is None
     assert not (tmp_path / "nvidia-converge-rollback.json").exists()
+
+
+def test_install_status_fails_on_command_failure():
+    report = Report(
+        "1.0",
+        "2026-05-06T00:00:00+00:00",
+        DesiredState(),
+        command_results=[CommandResult(["apt-get", "install"], 100, stderr="failed")],
+        verification=[Verification("nvidia-smi", True)],
+    )
+    assert _install_status(report) == 2
+
+
+def test_install_status_passes_when_commands_and_checks_pass():
+    report = Report(
+        "1.0",
+        "2026-05-06T00:00:00+00:00",
+        DesiredState(),
+        command_results=[CommandResult(["apt-get", "install"], 0)],
+        verification=[Verification("nvidia-smi", True)],
+    )
+    assert _install_status(report) == 0
