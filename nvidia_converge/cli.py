@@ -12,7 +12,7 @@ from .audit import audit_host
 from .desired import DesiredConfigError, load_desired
 from .doctor import diagnose
 from .human import render_human
-from .models import CommandResult, DesiredState, Report, utc_now
+from .models import CommandResult, DesiredState, PlanAction, Report, utc_now
 from .planner import build_plan, lock_actions
 from .report import report_json, sbom_from_audit, write_report
 from .rollback import RollbackSnapshotError, apply_rollback, create_snapshot, load_snapshot
@@ -101,13 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "install":
         report.rollback = create_snapshot(audit, persist=apply_changes)
         report.plan = build_plan(desired, audit, findings)
-        runner.results = []
-        for action in report.plan:
-            if action.id in {"snapshot.current-state", "verify.stack"}:
-                continue
-            for command in action.commands:
-                runner.run(command, mutate=True, allow_fail=True)
-        report.command_results = list(runner.results)
+        report.command_results = _run_plan_actions(report.plan, runner, skip_action_ids={"snapshot.current-state", "verify.stack"})
         post_audit = audit_host(runner)
         report.audit = post_audit
         report.findings = diagnose(desired, post_audit)
@@ -124,11 +118,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "lock":
         report.plan = lock_actions(desired, audit)
-        runner.results = []
-        for action in report.plan:
-            for command in action.commands:
-                runner.run(command, mutate=True, allow_fail=True)
-        report.command_results = runner.results
+        report.command_results = _run_plan_actions(report.plan, runner)
         emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return _status_from_results(runner.results)
 
@@ -171,6 +161,19 @@ def emit_validation(desired: DesiredState, out_path: str | None, json_stdout: bo
 
 def _requires_root(command: str) -> bool:
     return command in {"install", "lock", "rollback", "snapshot", "verify"}
+
+
+def _run_plan_actions(actions: list[PlanAction], runner: CommandRunner, *, skip_action_ids: set[str] | None = None) -> list[CommandResult]:
+    skipped = skip_action_ids or set()
+    runner.results = []
+    for action in actions:
+        if action.id in skipped:
+            continue
+        for command in action.commands:
+            result = runner.run(command, mutate=True, allow_fail=True)
+            if result.returncode not in (0, None):
+                return list(runner.results)
+    return list(runner.results)
 
 
 def _status_from_results(results: list[CommandResult]) -> int:

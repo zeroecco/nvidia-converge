@@ -4,9 +4,9 @@ from pathlib import Path
 import tomllib
 
 import nvidia_converge
-from nvidia_converge.cli import _install_status, main
+from nvidia_converge.cli import _install_status, _run_plan_actions, main
 from nvidia_converge.human import render_human
-from nvidia_converge.models import CommandResult, DesiredState, Report, Verification
+from nvidia_converge.models import CommandResult, DesiredState, PlanAction, Report, Verification
 
 
 def test_version_flag(capsys):
@@ -240,6 +240,24 @@ def test_install_status_passes_when_commands_and_checks_pass():
     assert _install_status(report) == 0
 
 
+def test_plan_execution_stops_after_first_failed_mutating_command():
+    runner = _FakeRunner([100, 0])
+    actions = [
+        PlanAction("install.packages", "Install packages.", [["apt-get", "install"], ["systemctl", "restart", "docker"]]),
+        PlanAction("lock.apt", "Lock packages.", [["apt-mark", "hold", "nvidia-driver-580-open"]]),
+    ]
+    results = _run_plan_actions(actions, runner)
+    assert [result.command for result in results] == [["apt-get", "install"]]
+    assert results[0].returncode == 100
+
+
+def test_plan_execution_continues_through_dry_run_skips():
+    runner = _FakeRunner([None, None])
+    actions = [PlanAction("configure.docker-runtime", "Configure Docker.", [["nvidia-ctk"], ["systemctl", "restart", "docker"]])]
+    results = _run_plan_actions(actions, runner)
+    assert [result.command for result in results] == [["nvidia-ctk"], ["systemctl", "restart", "docker"]]
+
+
 def test_human_output_includes_failed_command_stderr():
     report = Report(
         "1.0",
@@ -263,3 +281,15 @@ def test_human_output_includes_failed_command_stdout_fallback():
     output = render_human("install", report, apply=True)
     assert "- fail: zypper install" in output
     assert "  solver failed" in output
+
+
+class _FakeRunner:
+    def __init__(self, returncodes):
+        self.returncodes = list(returncodes)
+        self.results = []
+
+    def run(self, command, *, mutate=False, allow_fail=True, input_text=None):
+        del mutate, allow_fail, input_text
+        result = CommandResult(command, self.returncodes.pop(0))
+        self.results.append(result)
+        return result

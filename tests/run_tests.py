@@ -12,12 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import nvidia_converge
-from nvidia_converge.cli import main
+from nvidia_converge.cli import _run_plan_actions, main
 from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
 from nvidia_converge.doctor import diagnose
 from nvidia_converge.planner import build_plan, lock_actions
-from nvidia_converge.models import DesiredState, PackageInfo
+from nvidia_converge.models import CommandResult, DesiredState, PackageInfo, PlanAction
 from nvidia_converge.rollback import _rollback_commands
 from nvidia_converge.runner import CommandRunner
 from nvidia_converge.verify import verify_stack
@@ -49,6 +49,7 @@ def main_tests() -> int:
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
     test_snapshot_dry_run_does_not_write_rollback()
+    test_plan_execution_stops_after_failed_command()
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
     test_zypper_rollback_commands()
@@ -273,6 +274,16 @@ def test_snapshot_dry_run_does_not_write_rollback() -> None:
             os.chdir(cwd)
 
 
+def test_plan_execution_stops_after_failed_command() -> None:
+    runner = _FakeRunner([100, 0])
+    actions = [
+        PlanAction("install.packages", "Install packages.", [["apt-get", "install"], ["systemctl", "restart", "docker"]]),
+        PlanAction("lock.apt", "Lock packages.", [["apt-mark", "hold", "nvidia-driver-580-open"]]),
+    ]
+    results = _run_plan_actions(actions, runner)
+    assert [result.command for result in results] == [["apt-get", "install"]]
+
+
 def test_package_parser_deduplicates() -> None:
     packages = _parse_dpkg_packages("libnvidia-gl\t1\nlibnvidia-gl\t1\nzlib1g\t1\n")
     assert len(packages) == 1
@@ -306,6 +317,18 @@ def test_zypper_lock_plan() -> None:
     audit.package_manager = "zypper"
     locks = lock_actions(load_desired(None), audit)
     assert locks[0].id == "lock.zypper"
+
+
+class _FakeRunner:
+    def __init__(self, returncodes: list[int | None]):
+        self.returncodes = list(returncodes)
+        self.results: list[CommandResult] = []
+
+    def run(self, command: list[str], *, mutate: bool = False, allow_fail: bool = True, input_text: str | None = None) -> CommandResult:
+        del mutate, allow_fail, input_text
+        result = CommandResult(command, self.returncodes.pop(0))
+        self.results.append(result)
+        return result
 
 
 if __name__ == "__main__":
