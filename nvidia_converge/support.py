@@ -43,6 +43,7 @@ SUPPORT_MATRIX = {
     "desired_state_fields": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "fabric_manager", "mig", "kernel_policy"],
     "known_limits": [
         "apply and rollback are not yet integration-tested on disposable GPU nodes",
+        "host-mutation promotion criteria are documented in docs/integration-testing.md",
         "package names may need distro-specific tuning outside Ubuntu/RHEL/SUSE-family defaults",
         "release artifacts include checksums but no signed provenance attestations yet",
     ],

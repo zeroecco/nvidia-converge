@@ -75,6 +75,8 @@ nvidia-converge support
 nvidia-converge support --json
 ```
 
+The host-mutation integration test contract is documented in [docs/integration-testing.md](docs/integration-testing.md).
+
 ## Development
 
 ```bash
