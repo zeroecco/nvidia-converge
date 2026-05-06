@@ -163,6 +163,16 @@ def test_apply_requires_root_when_not_root(capsys):
     assert "must be run as root" in captured.err
 
 
+def test_read_only_commands_reject_apply(capsys):
+    try:
+        main(["plan", "--apply"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unrecognized arguments: --apply" in captured.err
+
+
 def test_bad_rollback_snapshot_is_clean_error(capsys, tmp_path):
     snapshot = tmp_path / "snapshot.json"
     snapshot.write_text("{}", encoding="utf-8")

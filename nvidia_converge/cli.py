@@ -27,8 +27,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _add_common_args(parser)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("doctor", "plan", "install", "verify", "lock", "snapshot"):
+    for name in ("doctor", "plan", "snapshot"):
         _add_common_args(sub.add_parser(name))
+    for name in ("install", "verify", "lock"):
+        _add_common_args(sub.add_parser(name), include_apply=True)
     validate = sub.add_parser("validate")
     validate.add_argument("--desired", default=argparse.SUPPRESS, help="Desired-state JSON/YAML file.")
     validate.add_argument("--out", default=argparse.SUPPRESS, help="Write machine-readable validation JSON to this path.")
@@ -38,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     support = sub.add_parser("support")
     support.add_argument("--json", action="store_true", help="Print support matrix as JSON.")
     rollback = sub.add_parser("rollback")
-    _add_common_args(rollback)
+    _add_common_args(rollback, include_apply=True)
     rollback.add_argument("--snapshot", required=True, help="Rollback snapshot JSON created by install or snapshot.")
     args = parser.parse_args(argv)
 
@@ -133,11 +135,12 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _add_common_args(parser: argparse.ArgumentParser) -> None:
+def _add_common_args(parser: argparse.ArgumentParser, *, include_apply: bool = False) -> None:
     parser.add_argument("--desired", default=argparse.SUPPRESS, help="Desired-state JSON/YAML file.")
     parser.add_argument("--out", default=argparse.SUPPRESS, help="Write machine-readable JSON report to this path.")
     parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print the full machine-readable JSON report to stdout instead of the human summary.")
-    parser.add_argument("--apply", action="store_true", default=argparse.SUPPRESS, help="Apply host-mutating actions. Without this, mutating commands are dry-run.")
+    if include_apply:
+        parser.add_argument("--apply", action="store_true", default=argparse.SUPPRESS, help="Apply host-mutating actions. Without this, mutating commands are dry-run.")
 
 
 def emit_report(command: str, report: Report, out_path: str | None, json_stdout: bool, apply_changes: bool) -> None:

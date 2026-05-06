@@ -28,6 +28,7 @@ def main_tests() -> int:
     test_driver_version_branch()
     test_invalid_desired_file()
     test_apply_requires_root()
+    test_read_only_commands_reject_apply()
     test_bad_rollback_snapshot()
     test_version_flag()
     test_validate_command()
@@ -94,6 +95,16 @@ def test_apply_requires_root() -> None:
         return
     with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
         assert main(["lock", "--apply"]) == 2
+
+
+def test_read_only_commands_reject_apply() -> None:
+    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        try:
+            main(["plan", "--apply"])
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("plan --apply should be rejected")
 
 
 def test_bad_rollback_snapshot() -> None:
