@@ -28,6 +28,7 @@ def main_tests() -> int:
     test_apply_requires_root()
     test_version_flag()
     test_schema_command()
+    test_support_command()
     test_report_has_schema_required_keys()
     test_desired_schema_mentions_bare_object()
     test_plan()
@@ -99,6 +100,14 @@ def test_schema_command() -> None:
         assert main(["schema", "report"]) == 0
     schema = json.loads(out.getvalue())
     assert schema["title"] == "nvidia-converge report"
+
+
+def test_support_command() -> None:
+    out = StringIO()
+    with redirect_stdout(out):
+        assert main(["support", "--json"]) == 0
+    matrix = json.loads(out.getvalue())
+    assert matrix["package_managers"]["apt-get"]["audit"] is True
 
 
 def test_report_has_schema_required_keys() -> None:

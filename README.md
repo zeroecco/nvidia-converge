@@ -31,6 +31,7 @@ python3 -m nvidia_converge plan --out report.json
 sudo python3 -m nvidia_converge install --apply --out report.json
 python3 -m nvidia_converge verify --out verify.json
 python3 -m nvidia_converge lock --apply --out lock.json
+python3 -m nvidia_converge support
 python3 -m nvidia_converge schema report
 sudo python3 -m nvidia_converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
 ```
@@ -64,6 +65,15 @@ sudo nvidia-converge rollback --snapshot /var/lib/nvidia-converge/snapshots/late
 ```
 
 Host-mutating commands (`install`, `lock`, `rollback`) are dry-run unless `--apply` is supplied.
+
+## Support Matrix
+
+The supported package managers, runtime assumptions, and known limits are available through:
+
+```bash
+nvidia-converge support
+nvidia-converge support --json
+```
 
 ## Development
 

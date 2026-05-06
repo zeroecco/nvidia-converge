@@ -15,6 +15,7 @@ from .report import report_json, sbom_from_audit, write_report
 from .rollback import apply_rollback, create_snapshot, load_snapshot
 from .runner import CommandRunner
 from .schemas import schema_json
+from .support import support_human, support_json
 from .verify import verify_stack
 
 
@@ -27,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
         _add_common_args(sub.add_parser(name))
     schema = sub.add_parser("schema")
     schema.add_argument("name", choices=("desired", "report"), help="Schema to print.")
+    support = sub.add_parser("support")
+    support.add_argument("--json", action="store_true", help="Print support matrix as JSON.")
     rollback = sub.add_parser("rollback")
     _add_common_args(rollback)
     rollback.add_argument("--snapshot", required=True, help="Rollback snapshot JSON created by install or snapshot.")
@@ -34,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "schema":
         print(schema_json(args.name))
+        return 0
+
+    if args.command == "support":
+        print(support_json() if args.json else support_human())
         return 0
 
     desired_path = getattr(args, "desired", None)

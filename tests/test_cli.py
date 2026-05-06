@@ -21,6 +21,24 @@ def test_schema_command_outputs_json(capsys):
     assert schema["title"] == "nvidia-converge desired state"
 
 
+def test_support_command_outputs_human_summary(capsys):
+    rc = main(["support"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out.startswith("nvidia-converge support matrix")
+    assert "apt-get" in captured.out
+    assert "Known limits:" in captured.out
+
+
+def test_support_json_outputs_machine_readable_matrix(capsys):
+    rc = main(["support", "--json"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    support = json.loads(captured.out)
+    assert support["package_managers"]["apt-get"]["install"] is True
+    assert support["package_managers"]["zypper"]["lock"] is True
+
+
 def test_lock_defaults_to_human_output(capsys, tmp_path):
     desired = tmp_path / "desired.yaml"
     desired.write_text(
