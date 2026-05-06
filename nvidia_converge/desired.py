@@ -34,12 +34,13 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
     root: dict[str, Any] = {}
     stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
     for raw_line in text.splitlines():
-        if not raw_line.strip() or raw_line.lstrip().startswith("#"):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#") or stripped in {"---", "..."}:
             continue
         indent = len(raw_line) - len(raw_line.lstrip(" "))
         if ":" not in raw_line:
             raise ValueError(f"unsupported YAML line: {raw_line!r}")
-        key, value = raw_line.strip().split(":", 1)
+        key, value = stripped.split(":", 1)
         while stack and indent <= stack[-1][0]:
             stack.pop()
         parent = stack[-1][1]
