@@ -15,6 +15,8 @@ from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
 from nvidia_converge.doctor import diagnose
 from nvidia_converge.planner import build_plan, lock_actions
+from nvidia_converge.models import PackageInfo
+from nvidia_converge.rollback import _rollback_commands
 from test_planner import _audit
 
 
@@ -33,6 +35,7 @@ def main_tests() -> int:
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
     test_package_parser_deduplicates()
+    test_rollback_filters_unrelated_packages()
     print("all tests passed")
     return 0
 
@@ -165,6 +168,17 @@ def test_package_parser_deduplicates() -> None:
     packages = _parse_dpkg_packages("libnvidia-gl\t1\nlibnvidia-gl\t1\nzlib1g\t1\n")
     assert len(packages) == 1
     assert packages[0].name == "libnvidia-gl"
+
+
+def test_rollback_filters_unrelated_packages() -> None:
+    commands = _rollback_commands(
+        [
+            PackageInfo("nvidia-driver-580-open", "580.126.16-1", "apt", True),
+            PackageInfo("bash", "5.2", "apt", True),
+        ],
+        "apt-get",
+    )
+    assert commands == [["apt-get", "install", "-y", "nvidia-driver-580-open=580.126.16-1"]]
 
 
 if __name__ == "__main__":

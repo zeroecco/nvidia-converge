@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .models import HostAudit, PackageInfo, RollbackSnapshot, utc_now
 from .runner import CommandRunner
+from .audit import _interesting_package
 
 SNAPSHOT_DIR = Path("/var/lib/nvidia-converge/snapshots")
 
@@ -42,7 +43,7 @@ def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list:
 
 
 def _rollback_commands(packages: list[PackageInfo], pm: str | None) -> list[list[str]]:
-    installed = [pkg for pkg in packages if pkg.installed and pkg.version]
+    installed = [pkg for pkg in packages if pkg.installed and pkg.version and _interesting_package(pkg.name)]
     if pm == "apt-get":
         specs = [f"{pkg.name}={pkg.version}" for pkg in installed if pkg.manager == "apt"]
         return [["apt-get", "install", "-y", *specs]] if specs else []
