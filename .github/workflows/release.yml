@@ -24,21 +24,35 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Run release gates
+        run: |
+          python -m pip install --upgrade pip ".[test]"
+          python -m compileall -q nvidia_converge tests
+          python tests/run_tests.py
+          python -m ruff check .
+          python -m mypy nvidia_converge
+          python -m pytest -q
+
       - name: Build artifacts
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install build twine
           python -m build
+          python -m twine check dist/*
 
       - name: Smoke test wheel
         run: |
           python -m pip install --force-reinstall dist/*.whl
           nvidia-converge --version
+          nvidia-converge validate --desired examples/compute-580-open.yaml
+          nvidia-converge schema desired | python -m json.tool >/dev/null
+          nvidia-converge schema integration-results | python -m json.tool >/dev/null
           nvidia-converge schema report | python -m json.tool >/dev/null
 
       - name: Generate checksums
         run: |
           cd dist
           sha256sum * > SHA256SUMS
+          sha256sum --check SHA256SUMS
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v2
