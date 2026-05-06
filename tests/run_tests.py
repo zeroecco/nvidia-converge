@@ -23,6 +23,7 @@ def main_tests() -> int:
     test_driver_version_branch()
     test_invalid_desired_file()
     test_apply_requires_root()
+    test_version_flag()
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
@@ -72,6 +73,14 @@ def test_apply_requires_root() -> None:
         return
     with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
         assert main(["lock", "--apply"]) == 2
+
+
+def test_version_flag() -> None:
+    try:
+        with redirect_stdout(StringIO()):
+            main(["--version"])
+    except SystemExit as exc:
+        assert exc.code == 0
 
 
 def test_plan() -> None:

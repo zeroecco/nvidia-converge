@@ -4,6 +4,15 @@ import os
 from nvidia_converge.cli import main
 
 
+def test_version_flag(capsys):
+    try:
+        main(["--version"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("nvidia-converge ")
+
+
 def test_lock_defaults_to_human_output(capsys, tmp_path):
     desired = tmp_path / "desired.yaml"
     desired.write_text(

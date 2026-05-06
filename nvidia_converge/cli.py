@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 
+from . import __version__
 from .audit import audit_host
 from .desired import DesiredConfigError, load_desired
 from .doctor import diagnose
@@ -18,6 +19,7 @@ from .verify import verify_stack
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nvidia-converge", description="Converge a node to a desired NVIDIA driver stack.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _add_common_args(parser)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("doctor", "plan", "install", "verify", "lock", "snapshot"):

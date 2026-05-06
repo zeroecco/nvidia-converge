@@ -25,6 +25,7 @@ Commands print a compact human summary by default. Use `--out report.json` to wr
 From a source checkout, run the CLI as a module:
 
 ```bash
+python3 -m nvidia_converge --version
 python3 -m nvidia_converge doctor
 python3 -m nvidia_converge plan --out report.json
 sudo python3 -m nvidia_converge install --apply --out report.json
