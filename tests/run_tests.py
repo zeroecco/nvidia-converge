@@ -29,8 +29,10 @@ def main_tests() -> int:
     test_bad_rollback_snapshot()
     test_version_flag()
     test_schema_command()
+    test_integration_results_schema_command()
     test_support_command()
     test_report_has_schema_required_keys()
+    test_integration_results_example_has_required_keys()
     test_desired_schema_mentions_bare_object()
     test_plan()
     test_cli_plan_report()
@@ -111,6 +113,14 @@ def test_schema_command() -> None:
     assert schema["title"] == "nvidia-converge report"
 
 
+def test_integration_results_schema_command() -> None:
+    out = StringIO()
+    with redirect_stdout(out):
+        assert main(["schema", "integration-results"]) == 0
+    schema = json.loads(out.getvalue())
+    assert schema["title"] == "nvidia-converge integration results"
+
+
 def test_support_command() -> None:
     out = StringIO()
     with redirect_stdout(out):
@@ -127,6 +137,13 @@ def test_report_has_schema_required_keys() -> None:
         report = json.loads(out.read_text(encoding="utf-8"))
         schema = json.loads(Path("schemas/report.schema.json").read_text(encoding="utf-8"))
         assert set(schema["required"]).issubset(report)
+
+
+def test_integration_results_example_has_required_keys() -> None:
+    example = json.loads(Path("integrations/results.example.json").read_text(encoding="utf-8"))
+    schema = json.loads(Path("schemas/integration-results.schema.json").read_text(encoding="utf-8"))
+    assert set(schema["required"]).issubset(example)
+    assert example["overall_status"] == "blocked"
 
 
 def test_desired_schema_mentions_bare_object() -> None:

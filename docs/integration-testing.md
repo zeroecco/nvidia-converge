@@ -45,3 +45,11 @@ The manual GitHub Actions workflow `.github/workflows/gpu-integration.yml` runs 
 ## Promotion Gate
 
 Treat `install --apply` and `rollback --apply` as production-proven only after the required scenarios pass on all required test nodes for the target release tag.
+
+Record promotion evidence in `integrations/results.<tag>.json` using `schemas/integration-results.schema.json`. The schema is also available through:
+
+```bash
+nvidia-converge schema integration-results
+```
+
+Start from `integrations/results.example.json`, replace blocked statuses with actual workflow results, and include the retained artifact URI and SHA256 for each GPU integration run.

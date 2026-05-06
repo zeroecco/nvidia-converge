@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zeroecco/nvidia-converge/schemas/integration-results.schema.json",
+  "title": "nvidia-converge integration results",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "generated_at", "commit", "operator", "overall_status", "runs", "required_coverage"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "release": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "commit": {
+      "type": "string",
+      "minLength": 7
+    },
+    "operator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "overall_status": {
+      "type": "string",
+      "enum": ["passed", "failed", "blocked"]
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/run"}
+    },
+    "required_coverage": {
+      "$ref": "#/$defs/required_coverage"
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "uri", "sha256"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "uri": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"}
+      }
+    },
+    "required_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ubuntu_lts", "rhel_family", "suse_family", "secure_boot", "fabric_manager", "mig_toggle", "install_apply", "rollback_apply"],
+      "properties": {
+        "ubuntu_lts": {"type": "boolean"},
+        "rhel_family": {"type": "boolean"},
+        "suse_family": {"type": "boolean"},
+        "secure_boot": {"type": "boolean"},
+        "fabric_manager": {"type": "boolean"},
+        "mig_toggle": {"type": "boolean"},
+        "install_apply": {"type": "boolean"},
+        "rollback_apply": {"type": "boolean"}
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "workflow_run", "runner_labels", "os_id", "os_version", "package_manager", "desired", "apply", "status", "started_at", "completed_at", "scenarios", "artifacts", "notes"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "workflow_run": {"type": "string", "minLength": 1},
+        "runner_labels": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "os_id": {"type": "string", "minLength": 1},
+        "os_version": {"type": "string"},
+        "package_manager": {"type": "string", "enum": ["apt-get", "dnf", "yum", "zypper"]},
+        "desired": {"type": "string", "minLength": 1},
+        "apply": {"type": "boolean"},
+        "status": {"type": "string", "enum": ["passed", "failed", "blocked"]},
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "scenarios": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/scenario"}
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/artifact"}
+        },
+        "notes": {"type": "string"}
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "report"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "doctor",
+            "plan",
+            "install_apply",
+            "verify_apply",
+            "lock_apply",
+            "snapshot",
+            "rollback_apply",
+            "verify_after_rollback",
+            "report_schema"
+          ]
+        },
+        "status": {"type": "string", "enum": ["passed", "failed", "blocked", "not_applicable"]},
+        "report": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

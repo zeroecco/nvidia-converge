@@ -1,0 +1,52 @@
+{
+  "schema_version": "1.0",
+  "release": "v0.1.0",
+  "generated_at": "2026-05-06T00:00:00Z",
+  "commit": "0000000",
+  "operator": "example",
+  "overall_status": "blocked",
+  "runs": [
+    {
+      "id": "ubuntu-24.04-apt-apply",
+      "workflow_run": "https://github.com/zeroecco/nvidia-converge/actions/runs/0000000000",
+      "runner_labels": ["self-hosted", "nvidia-gpu", "disposable", "ubuntu-24.04"],
+      "os_id": "ubuntu",
+      "os_version": "24.04",
+      "package_manager": "apt-get",
+      "desired": "examples/compute-580-open.yaml",
+      "apply": true,
+      "status": "blocked",
+      "started_at": "2026-05-06T00:00:00Z",
+      "completed_at": "2026-05-06T00:00:00Z",
+      "scenarios": [
+        {"name": "doctor", "status": "blocked", "report": null},
+        {"name": "plan", "status": "blocked", "report": null},
+        {"name": "install_apply", "status": "blocked", "report": null},
+        {"name": "verify_apply", "status": "blocked", "report": null},
+        {"name": "lock_apply", "status": "blocked", "report": null},
+        {"name": "snapshot", "status": "blocked", "report": null},
+        {"name": "rollback_apply", "status": "blocked", "report": null},
+        {"name": "verify_after_rollback", "status": "blocked", "report": null},
+        {"name": "report_schema", "status": "blocked", "report": null}
+      ],
+      "artifacts": [
+        {
+          "name": "gpu-integration-0000000000",
+          "uri": "https://github.com/zeroecco/nvidia-converge/actions/runs/0000000000",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "notes": "Example manifest. Replace blocked statuses with real disposable GPU-node results before release promotion."
+    }
+  ],
+  "required_coverage": {
+    "ubuntu_lts": false,
+    "rhel_family": false,
+    "suse_family": false,
+    "secure_boot": false,
+    "fabric_manager": false,
+    "mig_toggle": false,
+    "install_apply": false,
+    "rollback_apply": false
+  }
+}

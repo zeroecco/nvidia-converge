@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("doctor", "plan", "install", "verify", "lock", "snapshot"):
         _add_common_args(sub.add_parser(name))
     schema = sub.add_parser("schema")
-    schema.add_argument("name", choices=("desired", "report"), help="Schema to print.")
+    schema.add_argument("name", choices=("desired", "integration-results", "report"), help="Schema to print.")
     support = sub.add_parser("support")
     support.add_argument("--json", action="store_true", help="Print support matrix as JSON.")
     rollback = sub.add_parser("rollback")

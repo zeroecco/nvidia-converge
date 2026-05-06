@@ -76,6 +76,7 @@ nvidia-converge support --json
 ```
 
 The host-mutation integration test contract is documented in [docs/integration-testing.md](docs/integration-testing.md).
+Release promotion evidence should be recorded as `integrations/results.<tag>.json` and validated against the integration-results schema.
 
 ## Development
 
@@ -106,5 +107,6 @@ JSON Schemas are available in `schemas/` and through the CLI:
 
 ```bash
 nvidia-converge schema desired
+nvidia-converge schema integration-results
 nvidia-converge schema report
 ```

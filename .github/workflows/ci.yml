@@ -43,6 +43,7 @@ jobs:
         run: |
           python -m nvidia_converge --help
           python -m nvidia_converge plan --json | python -m json.tool >/dev/null
+          python -m nvidia_converge schema integration-results | python -m json.tool >/dev/null
 
       - name: Smoke test checkout launcher
         run: ./nvidia-converge --help
@@ -57,3 +58,4 @@ jobs:
           python -m pip install --force-reinstall dist/*.whl
           nvidia-converge --version
           nvidia-converge schema report | python -m json.tool >/dev/null
+          nvidia-converge schema integration-results | python -m json.tool >/dev/null

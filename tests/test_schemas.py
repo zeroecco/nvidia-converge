@@ -45,3 +45,9 @@ def test_desired_schema_accepts_bare_desired_object():
         "kernel_policy": "pin-compatible",
     }
     jsonschema.validate(desired, load_schema("desired"))
+
+
+def test_integration_results_example_validates():
+    with open("integrations/results.example.json", encoding="utf-8") as handle:
+        results = json.load(handle)
+    jsonschema.validate(results, load_schema("integration-results"))
