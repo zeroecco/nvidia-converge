@@ -31,7 +31,7 @@ python3 -m nvidia_converge doctor
 python3 -m nvidia_converge plan --out report.json
 sudo python3 -m nvidia_converge install --apply --out report.json
 sudo python3 -m nvidia_converge verify --apply --out verify.json
-python3 -m nvidia_converge lock --apply --out lock.json
+sudo python3 -m nvidia_converge lock --apply --out lock.json
 python3 -m nvidia_converge support
 python3 -m nvidia_converge schema report
 sudo python3 -m nvidia_converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
@@ -64,7 +64,7 @@ nvidia-converge validate --desired config.yaml --out validation.json
 nvidia-converge plan --out report.json
 sudo nvidia-converge install --apply --out report.json
 sudo nvidia-converge verify --apply --out verify.json
-nvidia-converge lock --apply --out lock.json
+sudo nvidia-converge lock --apply --out lock.json
 sudo nvidia-converge snapshot --apply --out snapshot.json
 sudo nvidia-converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
 ```

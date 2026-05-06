@@ -4,12 +4,14 @@ import json
 import os
 import sys
 import tempfile
+import tomllib
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import nvidia_converge
 from nvidia_converge.cli import main
 from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
@@ -31,6 +33,7 @@ def main_tests() -> int:
     test_read_only_commands_reject_apply()
     test_bad_rollback_snapshot()
     test_version_flag()
+    test_package_version_matches_cli_version()
     test_validate_command()
     test_schema_command()
     test_validation_schema_command()
@@ -122,6 +125,11 @@ def test_version_flag() -> None:
             main(["--version"])
     except SystemExit as exc:
         assert exc.code == 0
+
+
+def test_package_version_matches_cli_version() -> None:
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert nvidia_converge.__version__ == pyproject["project"]["version"]
 
 
 def test_validate_command() -> None:

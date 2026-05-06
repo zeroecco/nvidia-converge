@@ -1,7 +1,9 @@
 import json
 import os
 from pathlib import Path
+import tomllib
 
+import nvidia_converge
 from nvidia_converge.cli import _install_status, main
 from nvidia_converge.human import render_human
 from nvidia_converge.models import CommandResult, DesiredState, Report, Verification
@@ -14,6 +16,11 @@ def test_version_flag(capsys):
         assert exc.code == 0
     captured = capsys.readouterr()
     assert captured.out.startswith("nvidia-converge ")
+
+
+def test_package_version_matches_cli_version():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert nvidia_converge.__version__ == pyproject["project"]["version"]
 
 
 def test_schema_command_outputs_json(capsys):
