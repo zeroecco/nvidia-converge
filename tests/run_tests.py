@@ -15,7 +15,7 @@ from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
 from nvidia_converge.doctor import diagnose
 from nvidia_converge.planner import build_plan, lock_actions
-from nvidia_converge.models import PackageInfo
+from nvidia_converge.models import DesiredState, PackageInfo
 from nvidia_converge.rollback import _rollback_commands
 from test_planner import _audit
 
@@ -37,6 +37,7 @@ def main_tests() -> int:
     test_integration_results_example_has_required_keys()
     test_desired_schema_mentions_bare_object()
     test_plan()
+    test_secure_boot_disabled_finding()
     test_cli_plan_report()
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
@@ -185,6 +186,11 @@ def test_plan() -> None:
     assert "lock.apt" in ids
     locks = lock_actions(desired, audit)
     assert "nvidia-driver-580-open" in locks[0].commands[0]
+
+
+def test_secure_boot_disabled_finding() -> None:
+    findings = diagnose(DesiredState(secure_boot="disabled"), _audit())
+    assert any(finding.id == "secure-boot.enabled" for finding in findings)
 
 
 def test_cli_plan_report() -> None:

@@ -11,6 +11,8 @@ def diagnose(desired: DesiredState, audit: HostAudit) -> list[Finding]:
         findings.append(Finding("kernel.headers.missing", Severity.ERROR, "Kernel headers are missing", f"Headers for running kernel {audit.kernel.running} are required to compile or install the NVIDIA kernel module.", remediation="Install matching kernel headers or switch to a kernel with available headers."))
     if audit.kernel.compiler is None:
         findings.append(Finding("compiler.missing", Severity.ERROR, "No C compiler found", "The NVIDIA kernel module build needs gcc or cc.", remediation="Install build-essential or gcc/make for this distribution."))
+    if desired.secure_boot == "disabled" and audit.kernel.secure_boot_enabled is True:
+        findings.append(Finding("secure-boot.enabled", Severity.ERROR, "Secure Boot is enabled", "Desired state requires Secure Boot disabled.", remediation="Disable Secure Boot in firmware or change desired.secure_boot."))
     if desired.secure_boot == "signed" and audit.kernel.secure_boot_enabled and audit.module.signed is False:
         findings.append(Finding("secure-boot.unsigned-module", Severity.ERROR, "Secure Boot requires a signed NVIDIA module", "Secure Boot is enabled and modinfo did not show a module signer.", remediation="Install signed packages or enroll a MOK and sign the module."))
     if not audit.module.loaded:
