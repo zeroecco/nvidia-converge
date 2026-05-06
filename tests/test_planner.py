@@ -62,6 +62,15 @@ def test_lock_actions_support_zypper():
     assert "nvidia-open-580" in locks[0].commands[0]
 
 
+def test_plan_enables_mig_when_desired():
+    audit = _audit()
+    audit.mig_mode = "disabled"
+    plan = build_plan(DesiredState(mig="enabled"), audit, diagnose(DesiredState(mig="enabled"), audit))
+    action = next(action for action in plan if action.id == "enable.mig")
+    assert action.destructive is True
+    assert action.commands == [["nvidia-smi", "-mig", "1"]]
+
+
 def _audit() -> HostAudit:
     return HostAudit(
         timestamp="2026-05-06T00:00:00+00:00",

@@ -22,6 +22,8 @@ def build_plan(desired: DesiredState, audit: HostAudit, findings: list[Finding])
 
     if desired.mig == "disabled" and audit.mig_mode == "enabled":
         actions.append(PlanAction("disable.mig", "Disable MIG mode on all GPUs.", [["nvidia-smi", "-mig", "0"]], destructive=True, reason="May require GPU reset and workload drain."))
+    if desired.mig == "enabled" and audit.mig_mode == "disabled":
+        actions.append(PlanAction("enable.mig", "Enable MIG mode on all GPUs.", [["nvidia-smi", "-mig", "1"]], destructive=True, reason="May require GPU reset and workload drain."))
 
     if desired.kernel_policy == "pin-compatible":
         actions.extend(lock_actions(desired, audit))

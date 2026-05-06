@@ -10,6 +10,7 @@ def verify_stack(desired: DesiredState, runner: CommandRunner, audit: HostAudit 
     checks: list[Verification] = []
     if audit:
         checks.extend(_secure_boot_checks(desired, audit))
+        checks.append(_check("mig.mode", audit.mig_mode in {None, desired.mig}, f"MIG mode must match desired state {desired.mig}."))
     checks.append(_check("kernel.headers", Path(f"/lib/modules/{_kernel_release()}/build").exists(), "Running kernel headers are present."))
     dkms = runner.run(["dkms", "status", "-m", "nvidia"], allow_fail=True) if runner.exists("dkms") else None
     if dkms:

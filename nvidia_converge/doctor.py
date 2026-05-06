@@ -36,6 +36,8 @@ def diagnose(desired: DesiredState, audit: HostAudit) -> list[Finding]:
         findings.append(Finding("fabric-manager.inactive", Severity.WARNING, "NVIDIA Fabric Manager is inactive", "Desired state requires Fabric Manager to be installed and active.", remediation="Install and enable the matching nvidia-fabricmanager package."))
     if desired.mig == "disabled" and audit.mig_mode == "enabled":
         findings.append(Finding("mig.enabled", Severity.ERROR, "MIG mode is enabled", "Desired state requires MIG disabled.", remediation="Disable MIG with nvidia-smi -mig 0 and reset GPUs during a maintenance window."))
+    if desired.mig == "enabled" and audit.mig_mode == "disabled":
+        findings.append(Finding("mig.disabled", Severity.ERROR, "MIG mode is disabled", "Desired state requires MIG enabled.", remediation="Enable MIG with nvidia-smi -mig 1 and reset GPUs during a maintenance window."))
     if not findings:
         findings.append(Finding("stack.healthy", Severity.INFO, "NVIDIA stack matches observed desired-state checks", "No blocking audit issues were detected."))
     return findings

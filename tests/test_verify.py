@@ -28,6 +28,12 @@ def test_verify_passes_signed_module_policy_when_secure_boot_enabled():
     assert signed.ok is True
 
 
+def test_verify_fails_when_mig_mode_does_not_match():
+    checks = verify_stack(DesiredState(mig="enabled"), CommandRunner(), _audit(secure_boot_enabled=False, module_signed=True))
+    mig = next(check for check in checks if check.name == "mig.mode")
+    assert mig.ok is False
+
+
 def _audit(*, secure_boot_enabled: bool, module_signed: bool) -> HostAudit:
     return HostAudit(
         timestamp="2026-05-06T00:00:00+00:00",
