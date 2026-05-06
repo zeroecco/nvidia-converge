@@ -30,7 +30,7 @@ python3 -m nvidia_converge validate --desired config.yaml --out validation.json
 python3 -m nvidia_converge doctor
 python3 -m nvidia_converge plan --out report.json
 sudo python3 -m nvidia_converge install --apply --out report.json
-python3 -m nvidia_converge verify --out verify.json
+sudo python3 -m nvidia_converge verify --apply --out verify.json
 python3 -m nvidia_converge lock --apply --out lock.json
 python3 -m nvidia_converge support
 python3 -m nvidia_converge schema report
@@ -44,6 +44,7 @@ Or use the checkout-local launcher:
 ./nvidia-converge validate --desired config.yaml --out validation.json
 ./nvidia-converge plan --out report.json
 sudo ./nvidia-converge install --apply --out report.json
+sudo ./nvidia-converge verify --apply --out verify.json
 ```
 
 On Ubuntu and other PEP 668 distributions, do not install into the system Python with `python3 -m pip install -e .`. Use a virtual environment:
@@ -62,12 +63,13 @@ nvidia-converge doctor
 nvidia-converge validate --desired config.yaml --out validation.json
 nvidia-converge plan --out report.json
 sudo nvidia-converge install --apply --out report.json
-nvidia-converge verify --out verify.json
+sudo nvidia-converge verify --apply --out verify.json
 nvidia-converge lock --apply --out lock.json
 sudo nvidia-converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
 ```
 
-Host-mutating commands (`install`, `lock`, `rollback`) are dry-run unless `--apply` is supplied.
+Commands that execute host-mutating actions or checks (`install`, `verify`, `lock`, `rollback`) are dry-run unless `--apply` is supplied.
+Without `--apply`, `verify` still performs non-mutating checks but skips module-load and container GPU execution checks.
 
 ## Support Matrix
 
