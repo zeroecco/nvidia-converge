@@ -29,13 +29,24 @@ python3 -m nvidia_converge lock --apply --out lock.json
 sudo python3 -m nvidia_converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
 ```
 
-To install the console command in your current Python environment:
+Or use the checkout-local launcher:
 
 ```bash
-python3 -m pip install -e .
+./nvidia-converge doctor
+./nvidia-converge plan --out report.json
+sudo ./nvidia-converge install --apply --out report.json
 ```
 
-After installation, use the packaged command:
+On Ubuntu and other PEP 668 distributions, do not install into the system Python with `python3 -m pip install -e .`. Use a virtual environment:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e .
+nvidia-converge doctor
+```
+
+After venv installation, use the packaged command while the venv is active:
 
 ```bash
 nvidia-converge doctor
