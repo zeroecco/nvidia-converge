@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("--out", default=argparse.SUPPRESS, help="Write machine-readable validation JSON to this path.")
     validate.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print machine-readable validation details.")
     schema = sub.add_parser("schema")
-    schema.add_argument("name", choices=("desired", "integration-results", "report"), help="Schema to print.")
+    schema.add_argument("name", choices=("desired", "integration-results", "report", "validation"), help="Schema to print.")
     support = sub.add_parser("support")
     support.add_argument("--json", action="store_true", help="Print support matrix as JSON.")
     rollback = sub.add_parser("rollback")

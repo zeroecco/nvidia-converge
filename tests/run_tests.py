@@ -30,6 +30,7 @@ def main_tests() -> int:
     test_version_flag()
     test_validate_command()
     test_schema_command()
+    test_validation_schema_command()
     test_integration_results_schema_command()
     test_support_command()
     test_report_has_schema_required_keys()
@@ -126,6 +127,14 @@ def test_schema_command() -> None:
         assert main(["schema", "report"]) == 0
     schema = json.loads(out.getvalue())
     assert schema["title"] == "nvidia-converge report"
+
+
+def test_validation_schema_command() -> None:
+    out = StringIO()
+    with redirect_stdout(out):
+        assert main(["schema", "validation"]) == 0
+    schema = json.loads(out.getvalue())
+    assert schema["title"] == "nvidia-converge validation result"
 
 
 def test_integration_results_schema_command() -> None:

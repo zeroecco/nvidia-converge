@@ -47,6 +47,7 @@ jobs:
           nvidia-converge schema desired | python -m json.tool >/dev/null
           nvidia-converge schema integration-results | python -m json.tool >/dev/null
           nvidia-converge schema report | python -m json.tool >/dev/null
+          nvidia-converge schema validation | python -m json.tool >/dev/null
 
       - name: Generate checksums
         run: |

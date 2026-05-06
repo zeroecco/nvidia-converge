@@ -4,7 +4,7 @@ import json
 from importlib import resources
 from typing import Any, Literal, cast
 
-SchemaName = Literal["desired", "integration-results", "report"]
+SchemaName = Literal["desired", "integration-results", "report", "validation"]
 
 
 def load_schema(name: SchemaName) -> dict[str, Any]:

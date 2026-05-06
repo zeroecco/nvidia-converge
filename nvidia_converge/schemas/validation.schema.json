@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zeroecco/nvidia-converge/schemas/validation.schema.json",
+  "title": "nvidia-converge validation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "valid", "desired"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "valid": {
+      "type": "boolean",
+      "const": true
+    },
+    "desired": {
+      "$ref": "#/$defs/desired"
+    }
+  },
+  "$defs": {
+    "desired": {
+      "type": "object",
+      "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "fabric_manager", "mig", "kernel_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {"type": "string", "enum": ["compute"]},
+        "driver": {"type": "string", "pattern": "^\\d+(?:-open|\\.\\d+(?:\\.\\d+)?)?$"},
+        "cuda_compat": {"type": "string", "pattern": "^\\d+\\.\\d+$"},
+        "secure_boot": {"type": "string", "enum": ["signed", "unsigned", "disabled"]},
+        "container_runtime": {"type": "string", "enum": ["docker"]},
+        "fabric_manager": {"type": "boolean"},
+        "mig": {"type": "string", "enum": ["disabled", "enabled"]},
+        "kernel_policy": {"type": "string", "enum": ["pin-compatible"]}
+      }
+    }
+  }
+}

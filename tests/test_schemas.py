@@ -16,6 +16,13 @@ def test_report_schema_validates_plan_report(tmp_path):
     jsonschema.validate(report, load_schema("report"))
 
 
+def test_validation_schema_validates_validate_output(tmp_path):
+    out = tmp_path / "validation.json"
+    assert main(["validate", "--desired", "examples/compute-580-open.yaml", "--out", str(out)]) == 0
+    validation = json.loads(out.read_text(encoding="utf-8"))
+    jsonschema.validate(validation, load_schema("validation"))
+
+
 def test_desired_schema_accepts_example_config():
     desired = json.loads(
         """

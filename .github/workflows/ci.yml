@@ -51,6 +51,7 @@ jobs:
           python -m nvidia_converge validate --desired examples/compute-580-open.yaml
           python -m nvidia_converge plan --json | python -m json.tool >/dev/null
           python -m nvidia_converge schema integration-results | python -m json.tool >/dev/null
+          python -m nvidia_converge schema validation | python -m json.tool >/dev/null
 
       - name: Smoke test checkout launcher
         run: ./nvidia-converge --help
@@ -67,3 +68,4 @@ jobs:
           nvidia-converge validate --desired examples/compute-580-open.yaml
           nvidia-converge schema report | python -m json.tool >/dev/null
           nvidia-converge schema integration-results | python -m json.tool >/dev/null
+          nvidia-converge schema validation | python -m json.tool >/dev/null

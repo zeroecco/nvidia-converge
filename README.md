@@ -114,4 +114,5 @@ JSON Schemas are available in `schemas/` and through the CLI:
 nvidia-converge schema desired
 nvidia-converge schema integration-results
 nvidia-converge schema report
+nvidia-converge schema validation
 ```
