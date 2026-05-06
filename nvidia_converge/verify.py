@@ -8,6 +8,8 @@ from .runner import CommandRunner
 
 def verify_stack(desired: DesiredState, runner: CommandRunner, audit: HostAudit | None = None) -> list[Verification]:
     checks: list[Verification] = []
+    if audit:
+        checks.extend(_secure_boot_checks(desired, audit))
     checks.append(_check("kernel.headers", Path(f"/lib/modules/{_kernel_release()}/build").exists(), "Running kernel headers are present."))
     dkms = runner.run(["dkms", "status", "-m", "nvidia"], allow_fail=True) if runner.exists("dkms") else None
     if dkms:
@@ -27,6 +29,15 @@ def verify_stack(desired: DesiredState, runner: CommandRunner, audit: HostAudit 
     if desired.fabric_manager:
         fm = runner.run(["systemctl", "is-active", "nvidia-fabricmanager"], allow_fail=True) if runner.exists("systemctl") else None
         checks.append(Verification("fabric-manager", bool(fm and fm.returncode == 0), fm, "Fabric Manager service is active."))
+    return checks
+
+
+def _secure_boot_checks(desired: DesiredState, audit: HostAudit) -> list[Verification]:
+    checks: list[Verification] = []
+    if desired.secure_boot == "disabled":
+        checks.append(_check("secure-boot.policy", audit.kernel.secure_boot_enabled is not True, "Secure Boot must be disabled by desired policy."))
+    if desired.secure_boot == "signed" and audit.kernel.secure_boot_enabled:
+        checks.append(_check("secure-boot.module-signed", audit.module.signed is True, "NVIDIA module must be signed when Secure Boot is enabled."))
     return checks
 
 

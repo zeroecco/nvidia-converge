@@ -17,6 +17,8 @@ from nvidia_converge.doctor import diagnose
 from nvidia_converge.planner import build_plan, lock_actions
 from nvidia_converge.models import DesiredState, PackageInfo
 from nvidia_converge.rollback import _rollback_commands
+from nvidia_converge.runner import CommandRunner
+from nvidia_converge.verify import verify_stack
 from test_planner import _audit
 
 
@@ -38,6 +40,7 @@ def main_tests() -> int:
     test_desired_schema_mentions_bare_object()
     test_plan()
     test_secure_boot_disabled_finding()
+    test_secure_boot_verify_policy()
     test_cli_plan_report()
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
@@ -191,6 +194,11 @@ def test_plan() -> None:
 def test_secure_boot_disabled_finding() -> None:
     findings = diagnose(DesiredState(secure_boot="disabled"), _audit())
     assert any(finding.id == "secure-boot.enabled" for finding in findings)
+
+
+def test_secure_boot_verify_policy() -> None:
+    checks = verify_stack(DesiredState(secure_boot="disabled"), CommandRunner(), _audit())
+    assert any(check.name == "secure-boot.policy" and not check.ok for check in checks)
 
 
 def test_cli_plan_report() -> None:
