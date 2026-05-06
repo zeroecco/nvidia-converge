@@ -109,25 +109,29 @@ def _audit_packages(package_manager: str | None, runner: CommandRunner) -> list[
 
 
 def _parse_dpkg_packages(text: str) -> list[PackageInfo]:
-    packages: list[PackageInfo] = []
+    packages: dict[str, PackageInfo] = {}
     for line in text.splitlines():
         if "\t" not in line:
             continue
         name, version = line.split("\t", 1)
+        name = name.strip()
+        version = version.strip()
         if _interesting_package(name):
-            packages.append(PackageInfo(name=name, version=version, manager="apt", installed=True))
-    return sorted(packages, key=lambda pkg: pkg.name)
+            packages[name] = PackageInfo(name=name, version=version, manager="apt", installed=True)
+    return sorted(packages.values(), key=lambda pkg: pkg.name)
 
 
 def _parse_rpm_packages(text: str) -> list[PackageInfo]:
-    packages: list[PackageInfo] = []
+    packages: dict[str, PackageInfo] = {}
     for line in text.splitlines():
         if "\t" not in line:
             continue
         name, version = line.split("\t", 1)
+        name = name.strip()
+        version = version.strip()
         if _interesting_package(name):
-            packages.append(PackageInfo(name=name, version=version, manager="rpm", installed=True))
-    return sorted(packages, key=lambda pkg: pkg.name)
+            packages[name] = PackageInfo(name=name, version=version, manager="rpm", installed=True)
+    return sorted(packages.values(), key=lambda pkg: pkg.name)
 
 
 def _interesting_package(name: str) -> bool:

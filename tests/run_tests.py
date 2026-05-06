@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nvidia_converge.cli import main
+from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
 from nvidia_converge.doctor import diagnose
 from nvidia_converge.planner import build_plan, lock_actions
@@ -28,6 +29,7 @@ def main_tests() -> int:
     test_cli_plan_report()
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
+    test_package_parser_deduplicates()
     print("all tests passed")
     return 0
 
@@ -130,6 +132,12 @@ def test_install_dry_run_does_not_write_rollback() -> None:
             assert not Path("nvidia-converge-rollback.json").exists()
         finally:
             os.chdir(cwd)
+
+
+def test_package_parser_deduplicates() -> None:
+    packages = _parse_dpkg_packages("libnvidia-gl\t1\nlibnvidia-gl\t1\nzlib1g\t1\n")
+    assert len(packages) == 1
+    assert packages[0].name == "libnvidia-gl"
 
 
 if __name__ == "__main__":
