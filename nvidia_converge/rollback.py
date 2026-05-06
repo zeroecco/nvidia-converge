@@ -66,8 +66,8 @@ def _load_packages(value: Any) -> list[PackageInfo]:
         if not isinstance(entry, dict):
             raise RollbackSnapshotError(f"rollback snapshot packages[{index}] must be an object")
         name = _required_string(entry.get("name"), f"packages[{index}].name")
-        version = _optional_string(entry.get("version"), f"packages[{index}].version")
-        manager = _optional_string(entry.get("manager"), f"packages[{index}].manager")
+        version = _optional_package_string(entry.get("version"), f"packages[{index}].version")
+        manager = _optional_package_string(entry.get("manager"), f"packages[{index}].manager")
         installed = entry.get("installed")
         if not isinstance(installed, bool):
             raise RollbackSnapshotError(f"rollback snapshot packages[{index}].installed must be a boolean")
@@ -122,6 +122,12 @@ def _optional_string(value: Any, name: str) -> str | None:
     if not isinstance(value, str) or not value:
         raise RollbackSnapshotError(f"rollback snapshot {name} must be null or a non-empty string")
     return value
+
+
+def _optional_package_string(value: Any, name: str) -> str | None:
+    if value == "":
+        return None
+    return _optional_string(value, name)
 
 
 def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list[CommandResult]:

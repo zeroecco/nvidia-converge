@@ -16,6 +16,36 @@ def test_report_schema_validates_plan_report(tmp_path):
     jsonschema.validate(report, load_schema("report"))
 
 
+def test_report_schema_validates_all_command_reports(tmp_path, monkeypatch):
+    monkeypatch.setattr("nvidia_converge.rollback.SNAPSHOT_DIR", tmp_path / "snapshots")
+    schema = load_schema("report")
+    commands = {
+        "doctor": ["doctor"],
+        "plan": ["plan"],
+        "install": ["install"],
+        "verify": ["verify"],
+        "lock": ["lock"],
+        "snapshot": ["snapshot"],
+    }
+    for name, command in commands.items():
+        out = tmp_path / f"{name}.json"
+        main([*command, "--out", str(out)])
+        jsonschema.validate(json.loads(out.read_text(encoding="utf-8")), schema)
+
+    snapshot = {
+        "path": str(tmp_path / "snapshot.json"),
+        "packages": [{"name": "nvidia-driver-595", "version": "595.71.05-1", "manager": "apt", "installed": True}],
+        "kernel": "6.8.0-111-generic",
+        "module_version": "595.71.05",
+        "commands": [["apt-get", "install", "-y", "nvidia-driver-595=595.71.05-1"]],
+    }
+    snapshot_path = tmp_path / "rollback-snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    rollback_out = tmp_path / "rollback.json"
+    main(["rollback", "--snapshot", str(snapshot_path), "--out", str(rollback_out)])
+    jsonschema.validate(json.loads(rollback_out.read_text(encoding="utf-8")), schema)
+
+
 def test_validation_schema_validates_validate_output(tmp_path):
     out = tmp_path / "validation.json"
     assert main(["validate", "--desired", "examples/compute-580-open.yaml", "--out", str(out)]) == 0

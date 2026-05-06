@@ -112,9 +112,9 @@ def _parse_dpkg_packages(text: str) -> list[PackageInfo]:
     for line in text.splitlines():
         if "\t" not in line:
             continue
-        name, version = line.split("\t", 1)
+        name, version_text = line.split("\t", 1)
         name = name.strip()
-        version = version.strip()
+        version = version_text.strip() or None
         if _interesting_package(name):
             packages[name] = PackageInfo(name=name, version=version, manager="apt", installed=True)
     return sorted(packages.values(), key=lambda pkg: pkg.name)
@@ -125,9 +125,9 @@ def _parse_rpm_packages(text: str) -> list[PackageInfo]:
     for line in text.splitlines():
         if "\t" not in line:
             continue
-        name, version = line.split("\t", 1)
+        name, version_text = line.split("\t", 1)
         name = name.strip()
-        version = version.strip()
+        version = version_text.strip() or None
         if _interesting_package(name):
             packages[name] = PackageInfo(name=name, version=version, manager="rpm", installed=True)
     return sorted(packages.values(), key=lambda pkg: pkg.name)

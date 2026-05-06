@@ -81,6 +81,28 @@ def test_load_snapshot_accepts_valid_snapshot(tmp_path):
     assert snapshot.commands[0][0] == "zypper"
 
 
+def test_load_snapshot_tolerates_empty_package_version_from_older_snapshots(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps(
+            {
+                "path": "/var/lib/nvidia-converge/snapshots/example.json",
+                "packages": [
+                    {"name": "cuda-cub", "version": "", "manager": "apt", "installed": True},
+                    {"name": "libnvidia-ml.so.1", "version": "", "manager": "", "installed": True},
+                ],
+                "kernel": "6.8.0-111-generic",
+                "module_version": "595.71.05",
+                "commands": [["apt-get", "install", "-y", "nvidia-driver-595=595.71.05-1"]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = load_snapshot(str(path))
+    assert snapshot.packages[0].version is None
+    assert snapshot.packages[1].manager is None
+
+
 def test_load_snapshot_rejects_invalid_package_entry(tmp_path):
     path = tmp_path / "snapshot.json"
     path.write_text(
