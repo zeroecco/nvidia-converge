@@ -91,6 +91,27 @@ jobs:
         if: ${{ inputs.apply }}
         run: sudo env PYTHONPATH="$PWD" "$PWD/.venv/bin/python" -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify-after-rollback.json
 
+      - name: Validate generated report schemas
+        if: always()
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import jsonschema
+
+          from nvidia_converge.schemas import load_schema
+
+          schema = load_schema("report")
+          reports = sorted(Path("artifacts/reports").glob("*.json"))
+          if not reports:
+              raise SystemExit("no report JSON files were generated")
+          for report in reports:
+              with report.open(encoding="utf-8") as handle:
+                  jsonschema.validate(json.load(handle), schema)
+              print(f"validated {report}")
+          PY
+
       - name: Capture post-state
         if: always()
         shell: bash
