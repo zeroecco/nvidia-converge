@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .models import DesiredState
 
@@ -41,7 +41,7 @@ def load_desired(path: str | None) -> DesiredState:
 def _parse_structured(text: str) -> dict[str, Any]:
     stripped = text.lstrip()
     if stripped.startswith("{"):
-        return json.loads(text)
+        return cast(dict[str, Any], json.loads(text))
     return _parse_simple_yaml(text)
 
 

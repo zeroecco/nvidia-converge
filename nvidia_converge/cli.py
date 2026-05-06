@@ -11,7 +11,7 @@ from .audit import audit_host
 from .desired import DesiredConfigError, load_desired
 from .doctor import diagnose
 from .human import render_human
-from .models import Report, utc_now
+from .models import CommandResult, DesiredState, Report, utc_now
 from .planner import build_plan, lock_actions
 from .report import report_json, sbom_from_audit, write_report
 from .rollback import RollbackSnapshotError, apply_rollback, create_snapshot, load_snapshot
@@ -147,7 +147,7 @@ def emit_report(command: str, report: Report, out_path: str | None, json_stdout:
         print(render_human(command, report, apply=apply_changes))
 
 
-def emit_validation(desired, json_stdout: bool) -> None:
+def emit_validation(desired: DesiredState, json_stdout: bool) -> None:
     payload = {"schema_version": "1.0", "valid": True, "desired": asdict(desired)}
     if json_stdout:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -164,7 +164,7 @@ def _requires_root(command: str) -> bool:
     return command in {"install", "lock", "rollback", "verify"}
 
 
-def _status_from_results(results: list) -> int:
+def _status_from_results(results: list[CommandResult]) -> int:
     failed = [result for result in results if result.returncode not in (0, None)]
     return 2 if failed else 0
 

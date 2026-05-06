@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
-from .models import HostAudit, PackageInfo, RollbackSnapshot, utc_now
+from .models import CommandResult, HostAudit, PackageInfo, RollbackSnapshot, utc_now
 from .runner import CommandRunner
 from .audit import _interesting_package
 
@@ -54,10 +55,11 @@ def load_snapshot(path: str) -> RollbackSnapshot:
         packages = [PackageInfo(**pkg) for pkg in data.get("packages", [])]
     except TypeError as exc:
         raise RollbackSnapshotError(f"invalid rollback snapshot package entry: {exc}") from exc
-    return RollbackSnapshot(path=data.get("path", path), packages=packages, kernel=data["kernel"], module_version=data.get("module_version"), commands=data.get("commands", []))
+    commands = cast(list[list[str]], data.get("commands", []))
+    return RollbackSnapshot(path=data.get("path", path), packages=packages, kernel=data["kernel"], module_version=data.get("module_version"), commands=commands)
 
 
-def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list:
+def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list[CommandResult]:
     return [runner.run(command, mutate=True, allow_fail=True) for command in snapshot.commands]
 
 
