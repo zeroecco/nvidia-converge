@@ -1,0 +1,83 @@
+name: GPU Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      desired:
+        description: "Desired-state file to use"
+        required: false
+        default: "examples/compute-580-open.yaml"
+      apply:
+        description: "Run host-mutating install/verify/lock steps"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  gpu:
+    name: Self-hosted GPU node
+    runs-on: [self-hosted, nvidia-gpu, disposable]
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Capture pre-state
+        shell: bash
+        run: |
+          mkdir -p artifacts/pre artifacts/reports
+          uname -a | tee artifacts/pre/uname.txt
+          if command -v nvidia-smi; then nvidia-smi -q > artifacts/pre/nvidia-smi-q.txt || true; fi
+          if command -v dkms; then dkms status > artifacts/pre/dkms-status.txt || true; fi
+          if command -v modinfo; then modinfo nvidia > artifacts/pre/modinfo-nvidia.txt || true; fi
+
+      - name: Install test tooling
+        run: python3 -m pip install --user ".[test]"
+
+      - name: Plan
+        run: python3 -m nvidia_converge plan --desired "${{ inputs.desired }}" --out artifacts/reports/plan.json
+
+      - name: Validate plan report schema
+        run: python3 - <<'PY'
+          import json
+          import jsonschema
+          from nvidia_converge.schemas import load_schema
+          with open("artifacts/reports/plan.json", encoding="utf-8") as handle:
+              jsonschema.validate(json.load(handle), load_schema("report"))
+          PY
+
+      - name: Install
+        if: ${{ inputs.apply }}
+        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge install --desired "${{ inputs.desired }}" --apply --out artifacts/reports/install.json
+
+      - name: Verify
+        if: ${{ inputs.apply }}
+        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify.json
+
+      - name: Lock
+        if: ${{ inputs.apply }}
+        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge lock --desired "${{ inputs.desired }}" --apply --out artifacts/reports/lock.json
+
+      - name: Capture post-state
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/post
+          uname -a | tee artifacts/post/uname.txt
+          if command -v nvidia-smi; then nvidia-smi -q > artifacts/post/nvidia-smi-q.txt || true; fi
+          if command -v dkms; then dkms status > artifacts/post/dkms-status.txt || true; fi
+          if command -v modinfo; then modinfo nvidia > artifacts/post/modinfo-nvidia.txt || true; fi
+          for log in /var/log/apt/history.log /var/log/dnf.log /var/log/yum.log /var/log/zypp/history; do
+            if [ -r "$log" ]; then cp "$log" "artifacts/post/$(basename "$log")"; fi
+          done
+
+      - name: Upload integration artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-integration-${{ github.run_id }}
+          path: artifacts/
