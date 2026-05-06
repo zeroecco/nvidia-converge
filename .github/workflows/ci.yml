@@ -34,7 +34,7 @@ jobs:
         run: python tests/run_tests.py
 
       - name: Install test tooling
-        run: python -m pip install --upgrade pip pytest
+        run: python -m pip install --upgrade pip ".[test]"
 
       - name: Run pytest suite
         run: python -m pytest -q

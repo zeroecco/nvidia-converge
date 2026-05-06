@@ -63,6 +63,17 @@ sudo nvidia-converge rollback --snapshot /var/lib/nvidia-converge/snapshots/late
 
 Host-mutating commands (`install`, `lock`, `rollback`) are dry-run unless `--apply` is supplied.
 
+## Development
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -e ".[test]"
+python3 -m compileall -q nvidia_converge tests
+python3 tests/run_tests.py
+python3 -m pytest -q
+```
+
 ## Report
 
 Every command can write a JSON report with audit findings, diagnostics, proposed or applied actions, verification results, rollback snapshot metadata, and an SBOM-style package/module inventory.
