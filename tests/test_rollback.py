@@ -99,3 +99,13 @@ def test_load_snapshot_rejects_invalid_command_entry(tmp_path):
     )
     with pytest.raises(RollbackSnapshotError, match=r"commands\[0\] entries"):
         load_snapshot(str(path))
+
+
+def test_load_snapshot_rejects_unsupported_command(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps({"packages": [], "kernel": "6.8.0", "commands": [["sh", "-c", "id"]]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RollbackSnapshotError, match="not a supported rollback command"):
+        load_snapshot(str(path))

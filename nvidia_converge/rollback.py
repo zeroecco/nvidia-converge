@@ -83,8 +83,19 @@ def _load_commands(value: Any) -> list[list[str]]:
             raise RollbackSnapshotError(f"rollback snapshot commands[{index}] must be a non-empty array")
         if not all(isinstance(part, str) and part for part in command):
             raise RollbackSnapshotError(f"rollback snapshot commands[{index}] entries must be non-empty strings")
+        if not _allowed_rollback_command(command):
+            raise RollbackSnapshotError(f"rollback snapshot commands[{index}] is not a supported rollback command")
         commands.append(command)
     return commands
+
+
+def _allowed_rollback_command(command: list[str]) -> bool:
+    return (
+        command[:3] == ["apt-get", "install", "-y"]
+        or command[:3] == ["dnf", "downgrade", "-y"]
+        or command[:3] == ["yum", "downgrade", "-y"]
+        or command[:4] == ["zypper", "--non-interactive", "install", "--oldpackage"]
+    )
 
 
 def _required_string(value: Any, name: str) -> str:
