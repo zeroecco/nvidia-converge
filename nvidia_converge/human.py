@@ -41,7 +41,10 @@ def render_human(command: str, report: Report, *, apply: bool) -> str:
                 lines.append(f"  {check.command.stderr.splitlines()[0]}")
     if report.rollback:
         lines.append("")
-        lines.append(f"Rollback snapshot: {report.rollback.path}")
+        if report.rollback.path:
+            lines.append(f"Rollback snapshot: {report.rollback.path}")
+        else:
+            lines.append("Rollback snapshot: preview only; no file written during dry-run")
     lines.append("")
     if not apply and command in {"install", "lock", "rollback", "verify"}:
         lines.append("No host changes made. Re-run with --apply to execute mutating checks/actions.")

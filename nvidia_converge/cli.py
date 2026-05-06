@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "install":
-        report.rollback = create_snapshot(audit)
+        report.rollback = create_snapshot(audit, persist=apply_changes)
         report.plan = build_plan(desired, audit, findings)
         runner.results = []
         for action in report.plan:

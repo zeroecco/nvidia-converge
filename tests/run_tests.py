@@ -27,6 +27,7 @@ def main_tests() -> int:
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
+    test_install_dry_run_does_not_write_rollback()
     print("all tests passed")
     return 0
 
@@ -113,6 +114,22 @@ def test_install_dry_run() -> None:
         assert rc in {0, 2}
         report = json.loads(out.read_text(encoding="utf-8"))
         assert any(result.get("skipped") for result in report["command_results"])
+
+
+def test_install_dry_run_does_not_write_rollback() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = Path.cwd()
+        try:
+            os.chdir(tmp)
+            out = Path(tmp) / "install.json"
+            with redirect_stdout(StringIO()):
+                rc = main(["install", "--out", str(out)])
+            assert rc in {0, 2}
+            report = json.loads(out.read_text(encoding="utf-8"))
+            assert report["rollback"]["path"] is None
+            assert not Path("nvidia-converge-rollback.json").exists()
+        finally:
+            os.chdir(cwd)
 
 
 if __name__ == "__main__":

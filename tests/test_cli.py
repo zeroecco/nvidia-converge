@@ -85,3 +85,5 @@ def test_install_is_dry_run_without_apply(tmp_path):
     skipped = [result for result in report["command_results"] if result.get("skipped")]
     assert skipped
     assert all(result.get("reason") == "dry-run" for result in skipped)
+    assert report["rollback"]["path"] is None
+    assert not (tmp_path / "nvidia-converge-rollback.json").exists()

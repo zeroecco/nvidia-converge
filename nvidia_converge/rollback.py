@@ -9,16 +9,18 @@ from .runner import CommandRunner
 SNAPSHOT_DIR = Path("/var/lib/nvidia-converge/snapshots")
 
 
-def create_snapshot(audit: HostAudit, path: str | None = None) -> RollbackSnapshot:
+def create_snapshot(audit: HostAudit, path: str | None = None, *, persist: bool = True) -> RollbackSnapshot:
     snapshot_path = Path(path) if path else SNAPSHOT_DIR / f"{utc_now().replace(':', '-')}.json"
     commands = _rollback_commands(audit.packages, audit.package_manager)
     snapshot = RollbackSnapshot(
-        path=str(snapshot_path),
+        path=str(snapshot_path) if persist else None,
         packages=[pkg for pkg in audit.packages if pkg.installed],
         kernel=audit.kernel.running,
         module_version=audit.module.version,
         commands=commands,
     )
+    if not persist:
+        return snapshot
     try:
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(json.dumps(snapshot.__dict__, default=lambda obj: obj.__dict__, indent=2, sort_keys=True) + "\n", encoding="utf-8")
