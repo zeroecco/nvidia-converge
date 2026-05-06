@@ -46,3 +46,8 @@ jobs:
 
       - name: Smoke test checkout launcher
         run: ./nvidia-converge --help
+
+      - name: Build package artifacts
+        run: |
+          python -m pip install build
+          python -m build
