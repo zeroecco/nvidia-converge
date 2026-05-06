@@ -76,6 +76,15 @@ python3 -m pytest -q
 python3 -m build
 ```
 
+## Releases
+
+Tagged releases build and smoke-test wheel/sdist artifacts in GitHub Actions:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## Report
 
 Every command can write a JSON report with audit findings, diagnostics, proposed or applied actions, verification results, rollback snapshot metadata, and an SBOM-style package/module inventory.
