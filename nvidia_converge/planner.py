@@ -47,7 +47,7 @@ def lock_actions(desired: DesiredState, audit: HostAudit) -> list[PlanAction]:
 
 
 def _needs_driver_install(desired: DesiredState, audit: HostAudit) -> bool:
-    return not audit.module.version or not audit.module.version.startswith(desired.driver_major)
+    return not desired.matches_driver_version(audit.module.version)
 
 
 def _package_install_command(pm: str, desired: DesiredState, kernel: str) -> list[list[str]]:

@@ -17,8 +17,8 @@ def diagnose(desired: DesiredState, audit: HostAudit) -> list[Finding]:
         findings.append(Finding("secure-boot.unsigned-module", Severity.ERROR, "Secure Boot requires a signed NVIDIA module", "Secure Boot is enabled and modinfo did not show a module signer.", remediation="Install signed packages or enroll a MOK and sign the module."))
     if not audit.module.loaded:
         findings.append(Finding("module.not-loaded", Severity.ERROR, "NVIDIA kernel module is not loaded", "The host has no loaded nvidia kernel module, so GPUs will not be exposed to NVML or containers.", evidence={"devices": audit.module.devices}, remediation="Install the desired driver, rebuild initramfs if needed, and load nvidia."))
-    if audit.module.version and not audit.module.version.startswith(desired.driver_major):
-        findings.append(Finding("driver.version-mismatch", Severity.ERROR, "Loaded NVIDIA module does not match desired driver", f"Loaded module version {audit.module.version} does not match desired {desired.driver}.", remediation="Replace the installed driver with the desired branch."))
+    if audit.module.version and not desired.matches_driver_version(audit.module.version):
+        findings.append(Finding("driver.version-mismatch", Severity.ERROR, "Loaded NVIDIA module does not match desired driver", f"Loaded module version {audit.module.version} does not match desired {desired.driver_match_label}.", remediation="Replace the installed driver with the desired version or branch."))
     if desired.open_kernel_module and audit.module.open_module is False:
         findings.append(Finding("driver.closed-module", Severity.ERROR, "Closed NVIDIA module detected", "Desired state requires the open kernel module variant.", remediation="Install the open module package for the desired driver branch."))
     if audit.nvidia_smi.returncode != 0:

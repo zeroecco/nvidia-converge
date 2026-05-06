@@ -44,6 +44,13 @@ def test_fabric_manager_missing_is_blocking_when_desired():
     assert [finding.id for finding in findings] == ["fabric-manager.missing"]
 
 
+def test_exact_driver_version_mismatch_is_blocking():
+    audit = _healthy_audit()
+    audit.module.version = "595.60.01"
+    findings = diagnose(DesiredState(driver="595.71.05"), audit)
+    assert [finding.id for finding in findings] == ["driver.version-mismatch"]
+
+
 def _healthy_audit() -> HostAudit:
     return HostAudit(
         timestamp="2026-05-06T00:00:00+00:00",

@@ -1,6 +1,7 @@
 import pytest
 
 from nvidia_converge.desired import DesiredConfigError, load_desired
+from nvidia_converge.models import DesiredState
 
 
 def test_loads_default_desired_state():
@@ -53,7 +54,17 @@ desired:
     desired = load_desired(str(path))
     assert desired.driver == "595.71.05"
     assert desired.driver_major == "595"
+    assert desired.exact_driver_version is True
+    assert desired.matches_driver_version("595.71.05") is True
+    assert desired.matches_driver_version("595.60.01") is False
     assert desired.fabric_manager is True
+
+
+def test_driver_branch_matches_major_version():
+    desired = DesiredState(driver="580-open")
+    assert desired.exact_driver_version is False
+    assert desired.matches_driver_version("580.126.16") is True
+    assert desired.matches_driver_version("595.71.05") is False
 
 
 def test_rejects_unknown_desired_field(tmp_path):

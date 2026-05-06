@@ -7,7 +7,7 @@ from nvidia_converge.models import (
     RuntimeInfo,
 )
 from nvidia_converge.runner import CommandRunner
-from nvidia_converge.verify import verify_stack
+from nvidia_converge.verify import _nvidia_smi_matches_driver, verify_stack
 
 
 def test_verify_fails_when_secure_boot_should_be_disabled():
@@ -32,6 +32,12 @@ def test_verify_fails_when_mig_mode_does_not_match():
     checks = verify_stack(DesiredState(mig="enabled"), CommandRunner(), _audit(secure_boot_enabled=False, module_signed=True))
     mig = next(check for check in checks if check.name == "mig.mode")
     assert mig.ok is False
+
+
+def test_nvidia_smi_match_respects_exact_driver_version():
+    assert _nvidia_smi_matches_driver(DesiredState(driver="595.71.05"), "Driver Version: 595.71.05") is True
+    assert _nvidia_smi_matches_driver(DesiredState(driver="595.71.05"), "Driver Version: 595.60.01") is False
+    assert _nvidia_smi_matches_driver(DesiredState(driver="580-open"), "Driver Version: 580.126.16") is True
 
 
 def _audit(*, secure_boot_enabled: bool, module_signed: bool) -> HostAudit:

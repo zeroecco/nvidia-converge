@@ -20,7 +20,7 @@ def verify_stack(desired: DesiredState, runner: CommandRunner, audit: HostAudit 
     load = runner.run(["modprobe", "nvidia"], mutate=True, allow_fail=True) if runner.exists("modprobe") else None
     checks.append(Verification("module.load", bool(load and load.returncode == 0), load, "Loads nvidia module when --apply is used; dry-run records the command without marking it verified."))
     smi = runner.run(["nvidia-smi"], allow_fail=True) if runner.exists("nvidia-smi") else None
-    checks.append(Verification("nvidia-smi", bool(smi and smi.returncode == 0 and desired.driver_major in smi.stdout), smi, f"nvidia-smi must run and show driver branch {desired.driver_major}."))
+    checks.append(Verification("nvidia-smi", bool(smi and smi.returncode == 0 and _nvidia_smi_matches_driver(desired, smi.stdout)), smi, f"nvidia-smi must run and show driver {desired.driver_match_label}."))
     nvml = runner.run(["python3", "-c", "import ctypes; ctypes.CDLL('libnvidia-ml.so.1'); print('NVML load ok')"], allow_fail=True)
     checks.append(Verification("nvml", nvml.returncode == 0, nvml, "NVML shared library loads."))
     if desired.container_runtime == "docker":
@@ -50,3 +50,8 @@ def _kernel_release() -> str:
 
 def _check(name: str, ok: bool, detail: str) -> Verification:
     return Verification(name=name, ok=ok, detail=detail)
+
+
+def _nvidia_smi_matches_driver(desired: DesiredState, output: str) -> bool:
+    expected = desired.driver if desired.exact_driver_version else desired.driver_major
+    return expected in output

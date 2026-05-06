@@ -33,6 +33,21 @@ class DesiredState:
     def open_kernel_module(self) -> bool:
         return self.driver.endswith("-open")
 
+    @property
+    def exact_driver_version(self) -> bool:
+        return "." in self.driver
+
+    @property
+    def driver_match_label(self) -> str:
+        return f"version {self.driver}" if self.exact_driver_version else f"branch {self.driver_major}"
+
+    def matches_driver_version(self, version: str | None) -> bool:
+        if not version:
+            return False
+        if self.exact_driver_version:
+            return version == self.driver
+        return version.startswith(self.driver_major)
+
 
 @dataclass
 class CommandResult:

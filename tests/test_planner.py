@@ -73,6 +73,25 @@ def test_plan_enables_mig_when_desired():
     assert action.commands == [["nvidia-smi", "-mig", "1"]]
 
 
+def test_exact_driver_version_mismatch_plans_install():
+    audit = _audit()
+    audit.module.loaded = True
+    audit.module.version = "595.60.01"
+    audit.module.signed = True
+    audit.kernel.headers_installed = True
+    audit.kernel.compiler = "/usr/bin/gcc"
+    audit.runtime.docker_installed = True
+    audit.runtime.nvidia_container_runtime_installed = True
+    audit.runtime.docker_gpus_usable = True
+    audit.nvidia_smi = CommandResult(["nvidia-smi"], 0, stdout="Driver Version: 595.60.01")
+    audit.nvml = CommandResult(["python3"], 0)
+    audit.fabric_manager_active = True
+    audit.packages.append(PackageInfo("nvidia-fabricmanager-595", manager="apt", installed=True))
+    desired = DesiredState(driver="595.71.05")
+    plan = build_plan(desired, audit, diagnose(desired, audit))
+    assert "install.packages" in [action.id for action in plan]
+
+
 def _audit() -> HostAudit:
     return HostAudit(
         timestamp="2026-05-06T00:00:00+00:00",
