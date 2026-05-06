@@ -18,6 +18,8 @@ desired:
 
 ## Usage
 
+Commands print a compact human summary by default. Use `--out report.json` to write the full machine-readable report, or `--json` to print that report to stdout.
+
 From a source checkout, run the CLI as a module:
 
 ```bash

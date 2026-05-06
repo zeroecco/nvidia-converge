@@ -50,4 +50,5 @@ desired:
     )
     desired = load_desired(str(path))
     assert desired.driver == "595.71.05"
+    assert desired.driver_major == "595"
     assert desired.fabric_manager is True

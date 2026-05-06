@@ -6,9 +6,10 @@ import sys
 from .audit import audit_host
 from .desired import load_desired
 from .doctor import diagnose
+from .human import render_human
 from .models import Report, utc_now
 from .planner import build_plan, lock_actions
-from .report import sbom_from_audit, write_report
+from .report import report_json, sbom_from_audit, write_report
 from .rollback import apply_rollback, create_snapshot, load_snapshot
 from .runner import CommandRunner
 from .verify import verify_stack
@@ -28,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     desired_path = getattr(args, "desired", None)
     out_path = getattr(args, "out", None)
     apply_changes = getattr(args, "apply", False)
+    json_stdout = getattr(args, "json", False)
     desired = load_desired(desired_path)
     runner = CommandRunner(apply=apply_changes)
 
@@ -35,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = load_snapshot(args.snapshot)
         results = apply_rollback(snapshot, runner)
         report = Report("1.0", utc_now(), desired, command_results=results, rollback=snapshot)
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return _status_from_results(results)
 
     audit = audit_host(runner)
@@ -43,17 +45,17 @@ def main(argv: list[str] | None = None) -> int:
     report = Report("1.0", utc_now(), desired, audit=audit, findings=findings, sbom=sbom_from_audit(audit))
 
     if args.command == "doctor":
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return 0 if all(f.severity.value != "error" for f in findings) else 2
 
     if args.command == "plan":
         report.plan = build_plan(desired, audit, findings)
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return 0
 
     if args.command == "snapshot":
         report.rollback = create_snapshot(audit)
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return 0
 
     if args.command == "install":
@@ -65,19 +67,19 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             for command in action.commands:
                 runner.run(command, mutate=True, allow_fail=True)
-        report.command_results = runner.results
+        report.command_results = list(runner.results)
         post_audit = audit_host(runner)
         report.audit = post_audit
         report.findings = diagnose(desired, post_audit)
         report.verification = verify_stack(desired, runner, post_audit)
         report.sbom = sbom_from_audit(post_audit)
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return 0 if all(v.ok for v in report.verification) and all(f.severity.value != "error" for f in report.findings) else 2
 
     if args.command == "verify":
         runner.results = []
         report.verification = verify_stack(desired, runner, audit)
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return 0 if all(v.ok for v in report.verification) else 2
 
     if args.command == "lock":
@@ -87,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             for command in action.commands:
                 runner.run(command, mutate=True, allow_fail=True)
         report.command_results = runner.results
-        write_report(report, out_path)
+        emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return _status_from_results(runner.results)
 
     return 1
@@ -95,8 +97,18 @@ def main(argv: list[str] | None = None) -> int:
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--desired", default=argparse.SUPPRESS, help="Desired-state JSON/YAML file.")
-    parser.add_argument("--out", default=argparse.SUPPRESS, help="Write machine-readable JSON report to this path. Defaults to stdout.")
+    parser.add_argument("--out", default=argparse.SUPPRESS, help="Write machine-readable JSON report to this path.")
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print the full machine-readable JSON report to stdout instead of the human summary.")
     parser.add_argument("--apply", action="store_true", default=argparse.SUPPRESS, help="Apply host-mutating actions. Without this, mutating commands are dry-run.")
+
+
+def emit_report(command: str, report: Report, out_path: str | None, json_stdout: bool, apply_changes: bool) -> None:
+    if out_path:
+        write_report(report, out_path)
+    if json_stdout:
+        print(report_json(report))
+    else:
+        print(render_human(command, report, apply=apply_changes))
 
 
 def _status_from_results(results: list) -> int:

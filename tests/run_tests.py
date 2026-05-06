@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -17,6 +19,7 @@ from test_planner import _audit
 def main_tests() -> int:
     test_default_desired()
     test_yaml_desired()
+    test_driver_version_branch()
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
@@ -37,6 +40,22 @@ def test_yaml_desired() -> None:
     assert desired.open_kernel_module is True
 
 
+def test_driver_version_branch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "desired.yaml"
+        path.write_text(
+            """
+---
+desired:
+  driver: 595.71.05
+...
+""",
+            encoding="utf-8",
+        )
+        desired = load_desired(str(path))
+        assert desired.driver_major == "595"
+
+
 def test_plan() -> None:
     desired = load_desired(None)
     audit = _audit()
@@ -51,7 +70,8 @@ def test_plan() -> None:
 def test_cli_plan_report() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "plan.json"
-        assert main(["plan", "--out", str(out)]) == 0
+        with redirect_stdout(StringIO()):
+            assert main(["plan", "--out", str(out)]) == 0
         report = json.loads(out.read_text(encoding="utf-8"))
         assert report["desired"]["driver"] == "580-open"
         assert report["plan"]
@@ -61,7 +81,8 @@ def test_cli_plan_report() -> None:
 def test_install_dry_run() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "install.json"
-        rc = main(["install", "--out", str(out)])
+        with redirect_stdout(StringIO()):
+            rc = main(["install", "--out", str(out)])
         assert rc in {0, 2}
         report = json.loads(out.read_text(encoding="utf-8"))
         assert any(result.get("skipped") for result in report["command_results"])

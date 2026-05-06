@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+import re
 from typing import Any
 
 
@@ -25,7 +26,8 @@ class DesiredState:
 
     @property
     def driver_major(self) -> str:
-        return self.driver.split("-", 1)[0]
+        match = re.match(r"^(\d+)", self.driver)
+        return match.group(1) if match else self.driver.split("-", 1)[0]
 
     @property
     def open_kernel_module(self) -> bool:
