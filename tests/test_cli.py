@@ -39,6 +39,37 @@ def test_support_json_outputs_machine_readable_matrix(capsys):
     assert support["package_managers"]["zypper"]["lock"] is True
 
 
+def test_validate_command_outputs_human_summary(capsys, tmp_path):
+    desired = tmp_path / "desired.yaml"
+    desired.write_text(
+        """
+---
+desired:
+  driver: 595.71.05
+  cuda_compat: 13.0
+  container_runtime: docker
+  fabric_manager: true
+  kernel_policy: pin-compatible
+""",
+        encoding="utf-8",
+    )
+    rc = main(["validate", "--desired", str(desired)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.out.startswith("nvidia-converge validate")
+    assert "Desired state: valid" in captured.out
+    assert "595.71.05" in captured.out
+
+
+def test_validate_json_outputs_machine_readable_payload(capsys):
+    rc = main(["validate", "--desired", "examples/compute-580-open.yaml", "--json"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert payload["valid"] is True
+    assert payload["desired"]["driver"] == "580-open"
+
+
 def test_lock_defaults_to_human_output(capsys, tmp_path):
     desired = tmp_path / "desired.yaml"
     desired.write_text(

@@ -26,6 +26,7 @@ From a source checkout, run the CLI as a module:
 
 ```bash
 python3 -m nvidia_converge --version
+python3 -m nvidia_converge validate --desired config.yaml
 python3 -m nvidia_converge doctor
 python3 -m nvidia_converge plan --out report.json
 sudo python3 -m nvidia_converge install --apply --out report.json
@@ -40,6 +41,7 @@ Or use the checkout-local launcher:
 
 ```bash
 ./nvidia-converge doctor
+./nvidia-converge validate --desired config.yaml
 ./nvidia-converge plan --out report.json
 sudo ./nvidia-converge install --apply --out report.json
 ```
@@ -57,6 +59,7 @@ After venv installation, use the packaged command while the venv is active:
 
 ```bash
 nvidia-converge doctor
+nvidia-converge validate --desired config.yaml
 nvidia-converge plan --out report.json
 sudo nvidia-converge install --apply --out report.json
 nvidia-converge verify --out verify.json

@@ -28,6 +28,7 @@ def main_tests() -> int:
     test_apply_requires_root()
     test_bad_rollback_snapshot()
     test_version_flag()
+    test_validate_command()
     test_schema_command()
     test_integration_results_schema_command()
     test_support_command()
@@ -103,6 +104,19 @@ def test_version_flag() -> None:
             main(["--version"])
     except SystemExit as exc:
         assert exc.code == 0
+
+
+def test_validate_command() -> None:
+    out = StringIO()
+    with redirect_stdout(out):
+        assert main(["validate", "--desired", "examples/compute-580-open.yaml"]) == 0
+    assert "Desired state: valid" in out.getvalue()
+    out = StringIO()
+    with redirect_stdout(out):
+        assert main(["validate", "--desired", "examples/compute-580-open.yaml", "--json"]) == 0
+    validation = json.loads(out.getvalue())
+    assert validation["valid"] is True
+    assert validation["desired"]["driver"] == "580-open"
 
 
 def test_schema_command() -> None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from dataclasses import asdict
 
 from . import __version__
 from .audit import audit_host
@@ -26,6 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("doctor", "plan", "install", "verify", "lock", "snapshot"):
         _add_common_args(sub.add_parser(name))
+    validate = sub.add_parser("validate")
+    validate.add_argument("--desired", default=argparse.SUPPRESS, help="Desired-state JSON/YAML file.")
+    validate.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print machine-readable validation details.")
     schema = sub.add_parser("schema")
     schema.add_argument("name", choices=("desired", "integration-results", "report"), help="Schema to print.")
     support = sub.add_parser("support")
@@ -52,6 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     except DesiredConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if args.command == "validate":
+        emit_validation(desired, getattr(args, "json", False))
+        return 0
     if apply_changes and _requires_root(args.command) and hasattr(os, "geteuid") and os.geteuid() != 0:
         print(f"error: {args.command} --apply must be run as root", file=sys.stderr)
         return 2
@@ -137,6 +145,19 @@ def emit_report(command: str, report: Report, out_path: str | None, json_stdout:
         print(report_json(report))
     else:
         print(render_human(command, report, apply=apply_changes))
+
+
+def emit_validation(desired, json_stdout: bool) -> None:
+    payload = {"schema_version": "1.0", "valid": True, "desired": asdict(desired)}
+    if json_stdout:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    print("nvidia-converge validate")
+    print("Desired state: valid")
+    print(f"Driver: {desired.driver}")
+    print(f"CUDA compat: {desired.cuda_compat}")
+    print(f"Container runtime: {desired.container_runtime}")
+    print("Use --json to print machine-readable validation details.")
 
 
 def _requires_root(command: str) -> bool:
