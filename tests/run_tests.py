@@ -54,6 +54,7 @@ def main_tests() -> int:
     test_rollback_filters_unrelated_packages()
     test_zypper_rollback_commands()
     test_zypper_lock_plan()
+    test_gpu_integration_uses_virtualenv_for_python_tooling()
     print("all tests passed")
     return 0
 
@@ -317,6 +318,14 @@ def test_zypper_lock_plan() -> None:
     audit.package_manager = "zypper"
     locks = lock_actions(load_desired(None), audit)
     assert locks[0].id == "lock.zypper"
+
+
+def test_gpu_integration_uses_virtualenv_for_python_tooling() -> None:
+    workflow = Path(".github/workflows/gpu-integration.yml").read_text(encoding="utf-8")
+    assert "python3 -m pip install --user" not in workflow
+    assert "python3 -m venv .venv" in workflow
+    assert ".venv/bin/python -m nvidia_converge plan" in workflow
+    assert '"$PWD/.venv/bin/python" -m nvidia_converge install' in workflow
 
 
 class _FakeRunner:

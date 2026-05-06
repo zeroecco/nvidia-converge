@@ -36,14 +36,17 @@ jobs:
           if command -v modinfo; then modinfo nvidia > artifacts/pre/modinfo-nvidia.txt || true; fi
 
       - name: Install test tooling
-        run: python3 -m pip install --user ".[test]"
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install ".[test]"
 
       - name: Plan
-        run: python3 -m nvidia_converge plan --desired "${{ inputs.desired }}" --out artifacts/reports/plan.json
+        run: .venv/bin/python -m nvidia_converge plan --desired "${{ inputs.desired }}" --out artifacts/reports/plan.json
 
       - name: Validate plan report schema
         run: |
-          python3 - <<'PY'
+          .venv/bin/python - <<'PY'
           import json
           import jsonschema
           from nvidia_converge.schemas import load_schema
@@ -53,13 +56,13 @@ jobs:
 
       - name: Install
         if: ${{ inputs.apply }}
-        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge install --desired "${{ inputs.desired }}" --apply --out artifacts/reports/install.json
+        run: sudo env PYTHONPATH="$PWD" "$PWD/.venv/bin/python" -m nvidia_converge install --desired "${{ inputs.desired }}" --apply --out artifacts/reports/install.json
 
       - name: Locate rollback snapshot
         if: ${{ inputs.apply }}
         shell: bash
         run: |
-          python3 - <<'PY'
+          .venv/bin/python - <<'PY'
           import json
           from pathlib import Path
           report = json.loads(Path("artifacts/reports/install.json").read_text(encoding="utf-8"))
@@ -71,22 +74,22 @@ jobs:
 
       - name: Verify
         if: ${{ inputs.apply }}
-        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify.json
+        run: sudo env PYTHONPATH="$PWD" "$PWD/.venv/bin/python" -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify.json
 
       - name: Lock
         if: ${{ inputs.apply }}
-        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge lock --desired "${{ inputs.desired }}" --apply --out artifacts/reports/lock.json
+        run: sudo env PYTHONPATH="$PWD" "$PWD/.venv/bin/python" -m nvidia_converge lock --desired "${{ inputs.desired }}" --apply --out artifacts/reports/lock.json
 
       - name: Rollback
         if: ${{ inputs.apply }}
         shell: bash
         run: |
           snapshot="$(cat artifacts/reports/rollback-snapshot-path.txt)"
-          sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge rollback --desired "${{ inputs.desired }}" --snapshot "$snapshot" --apply --out artifacts/reports/rollback.json
+          sudo env PYTHONPATH="$PWD" "$PWD/.venv/bin/python" -m nvidia_converge rollback --desired "${{ inputs.desired }}" --snapshot "$snapshot" --apply --out artifacts/reports/rollback.json
 
       - name: Verify after rollback
         if: ${{ inputs.apply }}
-        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify-after-rollback.json
+        run: sudo env PYTHONPATH="$PWD" "$PWD/.venv/bin/python" -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify-after-rollback.json
 
       - name: Capture post-state
         if: always()
