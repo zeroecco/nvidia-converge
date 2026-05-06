@@ -1,7 +1,6 @@
 import json
 import os
 from pathlib import Path
-import tomllib
 
 import nvidia_converge
 from nvidia_converge.cli import _commands_succeeded, _install_status, _run_plan_actions, main
@@ -19,8 +18,7 @@ def test_version_flag(capsys):
 
 
 def test_package_version_matches_cli_version():
-    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    assert nvidia_converge.__version__ == pyproject["project"]["version"]
+    assert nvidia_converge.__version__ == _project_version()
 
 
 def test_schema_command_outputs_json(capsys):
@@ -322,3 +320,16 @@ class _FakeRunner:
         result = CommandResult(command, self.returncodes.pop(0))
         self.results.append(result)
         return result
+
+
+def _project_version():
+    in_project = False
+    for line in Path("pyproject.toml").read_text(encoding="utf-8").splitlines():
+        if line.strip() == "[project]":
+            in_project = True
+            continue
+        if in_project and line.startswith("["):
+            break
+        if in_project and line.startswith("version = "):
+            return line.split("=", 1)[1].strip().strip('"')
+    raise AssertionError("pyproject.toml is missing [project] version")

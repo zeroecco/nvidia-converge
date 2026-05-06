@@ -4,7 +4,6 @@ import json
 import os
 import sys
 import tempfile
-import tomllib
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -135,8 +134,7 @@ def test_version_flag() -> None:
 
 
 def test_package_version_matches_cli_version() -> None:
-    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    assert nvidia_converge.__version__ == pyproject["project"]["version"]
+    assert nvidia_converge.__version__ == _project_version()
 
 
 def test_validate_command() -> None:
@@ -404,6 +402,19 @@ class _BrokenStdout:
 
     def flush(self) -> None:
         return None
+
+
+def _project_version() -> str:
+    in_project = False
+    for line in Path("pyproject.toml").read_text(encoding="utf-8").splitlines():
+        if line.strip() == "[project]":
+            in_project = True
+            continue
+        if in_project and line.startswith("["):
+            break
+        if in_project and line.startswith("version = "):
+            return line.split("=", 1)[1].strip().strip('"')
+    raise AssertionError("pyproject.toml is missing [project] version")
 
 
 if __name__ == "__main__":
