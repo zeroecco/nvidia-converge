@@ -1,0 +1,52 @@
+from nvidia_converge.doctor import diagnose
+from nvidia_converge.models import (
+    CommandResult,
+    DesiredState,
+    HostAudit,
+    KernelInfo,
+    ModuleInfo,
+    PackageInfo,
+    RuntimeInfo,
+)
+from nvidia_converge.planner import build_plan, lock_actions
+
+
+def test_plan_includes_previewable_install_lock_verify_actions():
+    desired = DesiredState()
+    audit = _audit()
+    findings = diagnose(desired, audit)
+    plan = build_plan(desired, audit, findings)
+    ids = [action.id for action in plan]
+    assert "snapshot.current-state" in ids
+    assert "install.packages" in ids
+    assert "configure.docker-runtime" in ids
+    assert "enable.fabric-manager" in ids
+    assert "lock.apt" in ids
+    assert "verify.stack" in ids
+    install = next(action for action in plan if action.id == "install.packages")
+    flattened = [part for command in install.commands for part in command]
+    assert "nvidia-driver-580-open" in flattened
+    assert "cuda-compat-13-0" in flattened
+
+
+def test_lock_actions_pin_compatibility():
+    locks = lock_actions(DesiredState(), _audit())
+    assert locks[0].commands[0][0:2] == ["apt-mark", "hold"]
+    assert "nvidia-driver-580-open" in locks[0].commands[0]
+
+
+def _audit() -> HostAudit:
+    return HostAudit(
+        timestamp="2026-05-06T00:00:00+00:00",
+        os_id="ubuntu",
+        os_version="24.04",
+        package_manager="apt-get",
+        kernel=KernelInfo("6.8.0-test", headers_installed=False, compiler=None, secure_boot_enabled=True),
+        module=ModuleInfo(loaded=False, version=None, open_module=None, signed=False, devices=[]),
+        runtime=RuntimeInfo(docker_installed=False, nvidia_container_runtime_installed=False, docker_gpus_usable=False),
+        packages=[PackageInfo("nvidia-driver", manager="apt", installed=False)],
+        nvidia_smi=CommandResult(["nvidia-smi"], 127, stderr="not found"),
+        nvml=CommandResult(["python3"], 1, stderr="libnvidia-ml.so.1: cannot open shared object file"),
+        fabric_manager_active=False,
+        mig_mode=None,
+    )

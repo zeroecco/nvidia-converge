@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .models import HostAudit, PackageInfo, RollbackSnapshot, utc_now
+from .runner import CommandRunner
+
+SNAPSHOT_DIR = Path("/var/lib/nvidia-converge/snapshots")
+
+
+def create_snapshot(audit: HostAudit, path: str | None = None) -> RollbackSnapshot:
+    snapshot_path = Path(path) if path else SNAPSHOT_DIR / f"{utc_now().replace(':', '-')}.json"
+    commands = _rollback_commands(audit.packages, audit.package_manager)
+    snapshot = RollbackSnapshot(
+        path=str(snapshot_path),
+        packages=[pkg for pkg in audit.packages if pkg.installed],
+        kernel=audit.kernel.running,
+        module_version=audit.module.version,
+        commands=commands,
+    )
+    try:
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_path.write_text(json.dumps(snapshot.__dict__, default=lambda obj: obj.__dict__, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except PermissionError:
+        fallback = Path.cwd() / "nvidia-converge-rollback.json"
+        snapshot.path = str(fallback)
+        fallback.write_text(json.dumps(snapshot.__dict__, default=lambda obj: obj.__dict__, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return snapshot
+
+
+def load_snapshot(path: str) -> RollbackSnapshot:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    packages = [PackageInfo(**pkg) for pkg in data.get("packages", [])]
+    return RollbackSnapshot(path=data.get("path", path), packages=packages, kernel=data["kernel"], module_version=data.get("module_version"), commands=data.get("commands", []))
+
+
+def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list:
+    return [runner.run(command, mutate=True, allow_fail=True) for command in snapshot.commands]
+
+
+def _rollback_commands(packages: list[PackageInfo], pm: str | None) -> list[list[str]]:
+    installed = [pkg for pkg in packages if pkg.installed and pkg.version]
+    if pm == "apt-get":
+        specs = [f"{pkg.name}={pkg.version}" for pkg in installed if pkg.manager == "apt"]
+        return [["apt-get", "install", "-y", *specs]] if specs else []
+    if pm in {"dnf", "yum"}:
+        specs = [f"{pkg.name}-{pkg.version}" for pkg in installed if pkg.manager == "rpm"]
+        return [[pm, "downgrade", "-y", *specs]] if specs else []
+    return []

@@ -1,0 +1,9 @@
+desired:
+  role: compute
+  driver: 580-open
+  cuda_compat: 13.0
+  secure_boot: signed
+  container_runtime: docker
+  fabric_manager: true
+  mig: disabled
+  kernel_policy: pin-compatible
