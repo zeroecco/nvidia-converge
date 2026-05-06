@@ -1,4 +1,5 @@
 import json
+import os
 
 from nvidia_converge.cli import main
 
@@ -55,6 +56,16 @@ def test_bad_desired_file_is_clean_error(capsys, tmp_path):
     assert captured.out == ""
     assert captured.err.startswith("error:")
     assert "Traceback" not in captured.err
+
+
+def test_apply_requires_root_when_not_root(capsys):
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        return
+    rc = main(["lock", "--apply"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert "must be run as root" in captured.err
 
 
 def test_install_is_dry_run_without_apply(tmp_path):

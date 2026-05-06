@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
@@ -21,6 +22,7 @@ def main_tests() -> int:
     test_yaml_desired()
     test_driver_version_branch()
     test_invalid_desired_file()
+    test_apply_requires_root()
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
@@ -63,6 +65,13 @@ def test_invalid_desired_file() -> None:
         path.write_text("not yaml\n", encoding="utf-8")
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
             assert main(["plan", "--desired", str(path)]) == 2
+
+
+def test_apply_requires_root() -> None:
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        return
+    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        assert main(["lock", "--apply"]) == 2
 
 
 def test_plan() -> None:
