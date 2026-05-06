@@ -10,6 +10,10 @@ from .audit import _interesting_package
 SNAPSHOT_DIR = Path("/var/lib/nvidia-converge/snapshots")
 
 
+class RollbackSnapshotError(ValueError):
+    pass
+
+
 def create_snapshot(audit: HostAudit, path: str | None = None, *, persist: bool = True) -> RollbackSnapshot:
     snapshot_path = Path(path) if path else SNAPSHOT_DIR / f"{utc_now().replace(':', '-')}.json"
     commands = _rollback_commands(audit.packages, audit.package_manager)
@@ -33,8 +37,23 @@ def create_snapshot(audit: HostAudit, path: str | None = None, *, persist: bool 
 
 
 def load_snapshot(path: str) -> RollbackSnapshot:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    packages = [PackageInfo(**pkg) for pkg in data.get("packages", [])]
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RollbackSnapshotError(f"cannot read rollback snapshot {path!r}: {exc.strerror}") from exc
+    except json.JSONDecodeError as exc:
+        raise RollbackSnapshotError(f"invalid rollback snapshot JSON {path!r}: line {exc.lineno}: {exc.msg}") from exc
+    if not isinstance(data, dict):
+        raise RollbackSnapshotError("rollback snapshot must be a JSON object")
+    missing = [key for key in ("kernel", "packages", "commands") if key not in data]
+    if missing:
+        raise RollbackSnapshotError(f"rollback snapshot missing required field(s): {', '.join(missing)}")
+    if not isinstance(data["packages"], list) or not isinstance(data["commands"], list):
+        raise RollbackSnapshotError("rollback snapshot packages and commands must be arrays")
+    try:
+        packages = [PackageInfo(**pkg) for pkg in data.get("packages", [])]
+    except TypeError as exc:
+        raise RollbackSnapshotError(f"invalid rollback snapshot package entry: {exc}") from exc
     return RollbackSnapshot(path=data.get("path", path), packages=packages, kernel=data["kernel"], module_version=data.get("module_version"), commands=data.get("commands", []))
 
 

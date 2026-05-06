@@ -103,6 +103,17 @@ def test_apply_requires_root_when_not_root(capsys):
     assert "must be run as root" in captured.err
 
 
+def test_bad_rollback_snapshot_is_clean_error(capsys, tmp_path):
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text("{}", encoding="utf-8")
+    rc = main(["rollback", "--snapshot", str(snapshot)])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err.startswith("error:")
+    assert "Traceback" not in captured.err
+
+
 def test_install_is_dry_run_without_apply(tmp_path):
     out = tmp_path / "install.json"
     rc = main(["install", "--out", str(out)])

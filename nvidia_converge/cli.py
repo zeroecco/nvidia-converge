@@ -12,7 +12,7 @@ from .human import render_human
 from .models import Report, utc_now
 from .planner import build_plan, lock_actions
 from .report import report_json, sbom_from_audit, write_report
-from .rollback import apply_rollback, create_snapshot, load_snapshot
+from .rollback import RollbackSnapshotError, apply_rollback, create_snapshot, load_snapshot
 from .runner import CommandRunner
 from .schemas import schema_json
 from .support import support_human, support_json
@@ -58,7 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     runner = CommandRunner(apply=apply_changes)
 
     if args.command == "rollback":
-        snapshot = load_snapshot(args.snapshot)
+        try:
+            snapshot = load_snapshot(args.snapshot)
+        except RollbackSnapshotError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         results = apply_rollback(snapshot, runner)
         report = Report("1.0", utc_now(), desired, command_results=results, rollback=snapshot)
         emit_report(args.command, report, out_path, json_stdout, apply_changes)

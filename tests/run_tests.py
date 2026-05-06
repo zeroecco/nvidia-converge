@@ -26,6 +26,7 @@ def main_tests() -> int:
     test_driver_version_branch()
     test_invalid_desired_file()
     test_apply_requires_root()
+    test_bad_rollback_snapshot()
     test_version_flag()
     test_schema_command()
     test_support_command()
@@ -84,6 +85,14 @@ def test_apply_requires_root() -> None:
         return
     with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
         assert main(["lock", "--apply"]) == 2
+
+
+def test_bad_rollback_snapshot() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "snapshot.json"
+        path.write_text("{}", encoding="utf-8")
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            assert main(["rollback", "--snapshot", str(path)]) == 2
 
 
 def test_version_flag() -> None:

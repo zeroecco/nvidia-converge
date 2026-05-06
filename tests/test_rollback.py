@@ -1,5 +1,7 @@
 from nvidia_converge.models import PackageInfo
-from nvidia_converge.rollback import _rollback_commands
+from nvidia_converge.rollback import RollbackSnapshotError, _rollback_commands, load_snapshot
+
+import pytest
 
 
 def test_apt_rollback_only_restores_relevant_packages():
@@ -25,3 +27,10 @@ def test_rpm_rollback_only_restores_relevant_packages():
         "dnf",
     )
     assert commands == [["dnf", "downgrade", "-y", "nvidia-open-595-595.71.05-1", "nvidia-container-toolkit-1.19.0-1"]]
+
+
+def test_load_snapshot_rejects_missing_required_fields(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(RollbackSnapshotError, match="missing required"):
+        load_snapshot(str(path))
