@@ -27,9 +27,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _add_common_args(parser)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("doctor", "plan", "snapshot"):
+    for name in ("doctor", "plan"):
         _add_common_args(sub.add_parser(name))
-    for name in ("install", "verify", "lock"):
+    for name in ("install", "verify", "lock", "snapshot"):
         _add_common_args(sub.add_parser(name), include_apply=True)
     validate = sub.add_parser("validate")
     validate.add_argument("--desired", default=argparse.SUPPRESS, help="Desired-state JSON/YAML file.")
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "snapshot":
-        report.rollback = create_snapshot(audit)
+        report.rollback = create_snapshot(audit, persist=apply_changes)
         emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return 0
 
@@ -170,7 +170,7 @@ def emit_validation(desired: DesiredState, out_path: str | None, json_stdout: bo
 
 
 def _requires_root(command: str) -> bool:
-    return command in {"install", "lock", "rollback", "verify"}
+    return command in {"install", "lock", "rollback", "snapshot", "verify"}
 
 
 def _status_from_results(results: list[CommandResult]) -> int:

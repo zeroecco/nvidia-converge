@@ -23,6 +23,8 @@ def test_plan_includes_previewable_install_lock_verify_actions():
     assert "enable.fabric-manager" in ids
     assert "lock.apt" in ids
     assert "verify.stack" in ids
+    snapshot = next(action for action in plan if action.id == "snapshot.current-state")
+    assert snapshot.commands == [["nvidia-converge", "snapshot", "--apply"]]
     install = next(action for action in plan if action.id == "install.packages")
     flattened = [part for command in install.commands for part in command]
     assert "nvidia-driver-580-open" in flattened

@@ -65,10 +65,11 @@ nvidia-converge plan --out report.json
 sudo nvidia-converge install --apply --out report.json
 sudo nvidia-converge verify --apply --out verify.json
 nvidia-converge lock --apply --out lock.json
+sudo nvidia-converge snapshot --apply --out snapshot.json
 sudo nvidia-converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
 ```
 
-Commands that execute host-mutating actions or checks (`install`, `verify`, `lock`, `rollback`) are dry-run unless `--apply` is supplied.
+Commands that execute host-mutating actions, checks, or rollback snapshot writes (`install`, `verify`, `lock`, `snapshot`, `rollback`) are dry-run unless `--apply` is supplied.
 Without `--apply`, `verify` still performs non-mutating checks but skips module-load and container GPU execution checks.
 
 ## Support Matrix

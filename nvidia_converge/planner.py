@@ -11,7 +11,7 @@ def build_plan(desired: DesiredState, audit: HostAudit, findings: list[Finding])
 
     package_cmd = _package_install_command(pm, desired, audit.kernel.running)
     if any(f.severity == Severity.ERROR for f in findings) or _needs_driver_install(desired, audit):
-        actions.append(PlanAction("snapshot.current-state", "Record installed NVIDIA packages and kernel/module state before changes.", [["nvidia-converge", "snapshot"]], reason="Required for rollback."))
+        actions.append(PlanAction("snapshot.current-state", "Record installed NVIDIA packages and kernel/module state before changes.", [["nvidia-converge", "snapshot", "--apply"]], reason="Required for rollback."))
         actions.append(PlanAction("install.packages", "Install desired NVIDIA driver, CUDA compatibility, Fabric Manager, container runtime, and kernel build dependencies.", package_cmd, reason=f"Converge to driver {desired.driver} and CUDA compat {desired.cuda_compat}."))
 
     if desired.container_runtime == "docker":

@@ -31,7 +31,7 @@ The manual GitHub Actions workflow `.github/workflows/gpu-integration.yml` runs 
    - Docker GPU container can run `nvidia-smi`
    - Fabric Manager state matches the desired state
 6. `lock --apply` pins or locks the expected packages for the package manager.
-7. `snapshot` writes rollback metadata before mutation.
+7. `snapshot --apply` writes rollback metadata before mutation.
 8. `rollback --apply` restores the previous package/module state after an applied install.
 9. `--out report.json` emits a report that validates against `schemas/report.schema.json`.
 

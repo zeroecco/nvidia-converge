@@ -45,6 +45,7 @@ def main_tests() -> int:
     test_cli_plan_report()
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
+    test_snapshot_dry_run_does_not_write_rollback()
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
     test_zypper_rollback_commands()
@@ -242,6 +243,21 @@ def test_install_dry_run_does_not_write_rollback() -> None:
             with redirect_stdout(StringIO()):
                 rc = main(["install", "--out", str(out)])
             assert rc in {0, 2}
+            report = json.loads(out.read_text(encoding="utf-8"))
+            assert report["rollback"]["path"] is None
+            assert not Path("nvidia-converge-rollback.json").exists()
+        finally:
+            os.chdir(cwd)
+
+
+def test_snapshot_dry_run_does_not_write_rollback() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        cwd = Path.cwd()
+        try:
+            os.chdir(tmp)
+            out = Path(tmp) / "snapshot.json"
+            with redirect_stdout(StringIO()):
+                assert main(["snapshot", "--out", str(out)]) == 0
             report = json.loads(out.read_text(encoding="utf-8"))
             assert report["rollback"]["path"] is None
             assert not Path("nvidia-converge-rollback.json").exists()

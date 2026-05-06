@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 from nvidia_converge.cli import _install_status, main
 from nvidia_converge.human import render_human
@@ -192,6 +193,20 @@ def test_install_is_dry_run_without_apply(tmp_path):
     skipped = [result for result in report["command_results"] if result.get("skipped")]
     assert skipped
     assert all(result.get("reason") == "dry-run" for result in skipped)
+    assert report["rollback"]["path"] is None
+    assert not (tmp_path / "nvidia-converge-rollback.json").exists()
+
+
+def test_snapshot_is_dry_run_without_apply(tmp_path):
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        out = tmp_path / "snapshot.json"
+        rc = main(["snapshot", "--out", str(out)])
+    finally:
+        os.chdir(cwd)
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert rc == 0
     assert report["rollback"]["path"] is None
     assert not (tmp_path / "nvidia-converge-rollback.json").exists()
 

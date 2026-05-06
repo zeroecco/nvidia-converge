@@ -49,7 +49,7 @@ def render_human(command: str, report: Report, *, apply: bool) -> str:
         else:
             lines.append("Rollback snapshot: preview only; no file written during dry-run")
     lines.append("")
-    if not apply and command in {"install", "lock", "rollback", "verify"}:
+    if not apply and command in {"install", "lock", "rollback", "snapshot", "verify"}:
         lines.append("No host changes made. Re-run with --apply to execute mutating checks/actions.")
     lines.append("Use --out report.json for the full machine-readable report, or --json to print it.")
     return "\n".join(lines)
