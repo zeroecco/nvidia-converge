@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .models import DesiredState
 
@@ -50,8 +50,11 @@ def load_desired(path: str | None) -> DesiredState:
 
 def _parse_structured(text: str) -> dict[str, Any]:
     stripped = text.lstrip()
-    if stripped.startswith("{"):
-        return cast(dict[str, Any], json.loads(text))
+    if stripped.startswith(("{", "[")):
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("desired-state JSON must be an object")
+        return parsed
     return _parse_simple_yaml(text)
 
 

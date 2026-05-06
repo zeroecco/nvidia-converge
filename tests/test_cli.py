@@ -137,6 +137,18 @@ def test_bad_desired_file_is_clean_error(capsys, tmp_path):
     assert "Traceback" not in captured.err
 
 
+def test_bad_json_desired_shape_is_clean_error(capsys, tmp_path):
+    desired = tmp_path / "desired.json"
+    desired.write_text("[]", encoding="utf-8")
+    rc = main(["validate", "--desired", str(desired)])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err.startswith("error:")
+    assert "JSON must be an object" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_apply_requires_root_when_not_root(capsys):
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         return

@@ -70,6 +70,20 @@ desired:
         load_desired(str(path))
 
 
+def test_rejects_json_array_desired_file(tmp_path):
+    path = tmp_path / "desired.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(DesiredConfigError, match="JSON must be an object"):
+        load_desired(str(path))
+
+
+def test_rejects_json_desired_array_value(tmp_path):
+    path = tmp_path / "desired.json"
+    path.write_text('{"desired": []}', encoding="utf-8")
+    with pytest.raises(DesiredConfigError, match="desired state must be an object"):
+        load_desired(str(path))
+
+
 def test_rejects_non_boolean_fabric_manager(tmp_path):
     path = tmp_path / "desired.yaml"
     path.write_text(
