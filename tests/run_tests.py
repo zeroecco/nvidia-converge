@@ -17,8 +17,8 @@ from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
 from nvidia_converge.doctor import diagnose
 from nvidia_converge.planner import build_plan, lock_actions
-from nvidia_converge.models import CommandResult, DesiredState, PackageInfo, PlanAction
-from nvidia_converge.rollback import _rollback_commands
+from nvidia_converge.models import CommandResult, DesiredState, PackageInfo, PlanAction, RollbackSnapshot
+from nvidia_converge.rollback import _rollback_commands, apply_rollback
 from nvidia_converge.runner import CommandRunner
 from nvidia_converge.verify import verify_stack
 from test_planner import _audit
@@ -54,6 +54,7 @@ def main_tests() -> int:
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
     test_zypper_rollback_commands()
+    test_apply_rollback_stops_after_failed_command()
     test_zypper_lock_plan()
     test_gpu_integration_uses_virtualenv_for_python_tooling()
     test_gpu_integration_validates_every_generated_report()
@@ -318,6 +319,22 @@ def test_zypper_rollback_commands() -> None:
         "zypper",
     )
     assert commands == [["zypper", "--non-interactive", "install", "--oldpackage", "nvidia-open-595=595.71.05-1"]]
+
+
+def test_apply_rollback_stops_after_failed_command() -> None:
+    snapshot = RollbackSnapshot(
+        path=None,
+        packages=[],
+        kernel="6.8.0-test",
+        module_version=None,
+        commands=[
+            ["apt-get", "install", "-y", "nvidia-driver-580=580.1"],
+            ["apt-get", "install", "-y", "cuda-compat-13-0=13.0"],
+        ],
+    )
+    runner = _FakeRunner([100, 0])
+    results = apply_rollback(snapshot, runner)
+    assert [result.command for result in results] == [["apt-get", "install", "-y", "nvidia-driver-580=580.1"]]
 
 
 def test_zypper_lock_plan() -> None:

@@ -1,5 +1,5 @@
-from nvidia_converge.models import PackageInfo
-from nvidia_converge.rollback import RollbackSnapshotError, _rollback_commands, load_snapshot
+from nvidia_converge.models import CommandResult, PackageInfo, RollbackSnapshot
+from nvidia_converge.rollback import RollbackSnapshotError, _rollback_commands, apply_rollback, load_snapshot
 
 import json
 
@@ -151,3 +151,28 @@ def test_load_snapshot_rejects_empty_rollback_command_specs(tmp_path):
     )
     with pytest.raises(RollbackSnapshotError, match="not a supported rollback command"):
         load_snapshot(str(path))
+
+
+def test_apply_rollback_stops_after_first_failed_command():
+    snapshot = RollbackSnapshot(
+        path=None,
+        packages=[],
+        kernel="6.8.0-test",
+        module_version=None,
+        commands=[
+            ["apt-get", "install", "-y", "nvidia-driver-580=580.1"],
+            ["apt-get", "install", "-y", "cuda-compat-13-0=13.0"],
+        ],
+    )
+    runner = _FakeRunner([100, 0])
+    results = apply_rollback(snapshot, runner)
+    assert [result.command for result in results] == [["apt-get", "install", "-y", "nvidia-driver-580=580.1"]]
+
+
+class _FakeRunner:
+    def __init__(self, returncodes):
+        self.returncodes = list(returncodes)
+
+    def run(self, command, *, mutate=False, allow_fail=True, input_text=None):
+        del mutate, allow_fail, input_text
+        return CommandResult(command, self.returncodes.pop(0))

@@ -131,7 +131,13 @@ def _optional_package_string(value: Any, name: str) -> str | None:
 
 
 def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list[CommandResult]:
-    return [runner.run(command, mutate=True, allow_fail=True) for command in snapshot.commands]
+    results: list[CommandResult] = []
+    for command in snapshot.commands:
+        result = runner.run(command, mutate=True, allow_fail=True)
+        results.append(result)
+        if result.returncode not in (0, None):
+            break
+    return results
 
 
 def _rollback_commands(packages: list[PackageInfo], pm: str | None) -> list[list[str]]:
