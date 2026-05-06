@@ -38,7 +38,7 @@ def render_human(command: str, report: Report, *, apply: bool) -> str:
         lines.append("")
         lines.append("Verification:")
         for check in report.verification:
-            status = "ok" if check.ok else "fail"
+            status = _verification_status(check.command, check.ok)
             lines.append(f"- {status}: {check.name}")
             if check.command and check.command.stderr and not check.ok:
                 lines.append(f"  {check.command.stderr.splitlines()[0]}")
@@ -73,6 +73,12 @@ def _result_line(result: CommandResult) -> str:
     prefix = "skip" if result.skipped else "ok" if result.returncode == 0 else "fail"
     suffix = f" ({result.reason})" if result.reason else ""
     return f"- {prefix}: {_join_command(result.command)}{suffix}"
+
+
+def _verification_status(command: CommandResult | None, ok: bool) -> str:
+    if command and command.skipped:
+        return "skip"
+    return "ok" if ok else "fail"
 
 
 def _failure_detail(result: CommandResult) -> str | None:

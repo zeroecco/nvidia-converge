@@ -51,6 +51,7 @@ def main_tests() -> int:
     test_snapshot_dry_run_does_not_write_rollback()
     test_failed_command_results_are_not_safe_for_post_install_verify()
     test_plan_execution_stops_after_failed_command()
+    test_human_output_marks_skipped_verification_as_skip()
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
     test_zypper_rollback_commands()
@@ -291,6 +292,21 @@ def test_plan_execution_stops_after_failed_command() -> None:
     ]
     results = _run_plan_actions(actions, runner)
     assert [result.command for result in results] == [["apt-get", "install"]]
+
+
+def test_human_output_marks_skipped_verification_as_skip() -> None:
+    from nvidia_converge.human import render_human
+    from nvidia_converge.models import Report, Verification
+
+    report = Report(
+        "1.0",
+        "2026-05-06T00:00:00+00:00",
+        DesiredState(),
+        verification=[Verification("module.load", False, CommandResult(["modprobe", "nvidia"], None, skipped=True, reason="dry-run"))],
+    )
+    output = render_human("verify", report, apply=False)
+    assert "- skip: module.load" in output
+    assert "- fail: module.load" not in output
 
 
 def test_package_parser_deduplicates() -> None:

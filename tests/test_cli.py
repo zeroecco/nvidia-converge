@@ -288,6 +288,18 @@ def test_human_output_includes_failed_command_stdout_fallback():
     assert "  solver failed" in output
 
 
+def test_human_output_marks_skipped_verification_as_skip():
+    report = Report(
+        "1.0",
+        "2026-05-06T00:00:00+00:00",
+        DesiredState(),
+        verification=[Verification("module.load", False, CommandResult(["modprobe", "nvidia"], None, skipped=True, reason="dry-run"))],
+    )
+    output = render_human("verify", report, apply=False)
+    assert "- skip: module.load" in output
+    assert "- fail: module.load" not in output
+
+
 class _FakeRunner:
     def __init__(self, returncodes):
         self.returncodes = list(returncodes)
