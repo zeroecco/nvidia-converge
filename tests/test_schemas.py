@@ -31,3 +31,17 @@ def test_desired_schema_accepts_example_config():
 """
     )
     jsonschema.validate(desired, load_schema("desired"))
+
+
+def test_desired_schema_accepts_bare_desired_object():
+    desired = {
+        "role": "compute",
+        "driver": "595.71.05",
+        "cuda_compat": "13.0",
+        "secure_boot": "signed",
+        "container_runtime": "docker",
+        "fabric_manager": True,
+        "mig": "disabled",
+        "kernel_policy": "pin-compatible",
+    }
+    jsonschema.validate(desired, load_schema("desired"))

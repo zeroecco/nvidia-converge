@@ -27,6 +27,7 @@ def main_tests() -> int:
     test_version_flag()
     test_schema_command()
     test_report_has_schema_required_keys()
+    test_desired_schema_mentions_bare_object()
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
@@ -104,6 +105,12 @@ def test_report_has_schema_required_keys() -> None:
         report = json.loads(out.read_text(encoding="utf-8"))
         schema = json.loads(Path("schemas/report.schema.json").read_text(encoding="utf-8"))
         assert set(schema["required"]).issubset(report)
+
+
+def test_desired_schema_mentions_bare_object() -> None:
+    schema = json.loads(Path("schemas/desired.schema.json").read_text(encoding="utf-8"))
+    assert "oneOf" in schema
+    assert any(option.get("$ref") == "#/$defs/desired" for option in schema["oneOf"])
 
 
 def test_plan() -> None:

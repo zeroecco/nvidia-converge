@@ -2,14 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/zeroecco/nvidia-converge/schemas/desired.schema.json",
   "title": "nvidia-converge desired state",
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "desired": {
+  "oneOf": [
+    {
       "$ref": "#/$defs/desired"
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "desired": {
+          "$ref": "#/$defs/desired"
+        }
+      },
+      "required": ["desired"]
     }
-  },
-  "required": ["desired"],
+  ],
   "$defs": {
     "desired": {
       "type": "object",
