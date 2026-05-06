@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from .audit import audit_host
-from .desired import load_desired
+from .desired import DesiredConfigError, load_desired
 from .doctor import diagnose
 from .human import render_human
 from .models import Report, utc_now
@@ -30,7 +30,11 @@ def main(argv: list[str] | None = None) -> int:
     out_path = getattr(args, "out", None)
     apply_changes = getattr(args, "apply", False)
     json_stdout = getattr(args, "json", False)
-    desired = load_desired(desired_path)
+    try:
+        desired = load_desired(desired_path)
+    except DesiredConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     runner = CommandRunner(apply=apply_changes)
 
     if args.command == "rollback":

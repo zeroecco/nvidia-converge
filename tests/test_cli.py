@@ -46,6 +46,17 @@ def test_json_flag_prints_machine_readable_report(capsys):
     assert report["schema_version"] == "1.0"
 
 
+def test_bad_desired_file_is_clean_error(capsys, tmp_path):
+    desired = tmp_path / "desired.yaml"
+    desired.write_text("not yaml\n", encoding="utf-8")
+    rc = main(["plan", "--desired", str(desired)])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert captured.err.startswith("error:")
+    assert "Traceback" not in captured.err
+
+
 def test_install_is_dry_run_without_apply(tmp_path):
     out = tmp_path / "install.json"
     rc = main(["install", "--out", str(out)])

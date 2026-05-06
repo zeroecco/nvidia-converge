@@ -1,4 +1,6 @@
-from nvidia_converge.desired import load_desired
+import pytest
+
+from nvidia_converge.desired import DesiredConfigError, load_desired
 
 
 def test_loads_default_desired_state():
@@ -52,3 +54,30 @@ desired:
     assert desired.driver == "595.71.05"
     assert desired.driver_major == "595"
     assert desired.fabric_manager is True
+
+
+def test_rejects_unknown_desired_field(tmp_path):
+    path = tmp_path / "desired.yaml"
+    path.write_text(
+        """
+desired:
+  driver: 580-open
+  typo: value
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(DesiredConfigError, match="unknown desired-state field"):
+        load_desired(str(path))
+
+
+def test_rejects_non_boolean_fabric_manager(tmp_path):
+    path = tmp_path / "desired.yaml"
+    path.write_text(
+        """
+desired:
+  fabric_manager: yes
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(DesiredConfigError, match="fabric_manager"):
+        load_desired(str(path))

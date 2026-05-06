@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
@@ -20,6 +20,7 @@ def main_tests() -> int:
     test_default_desired()
     test_yaml_desired()
     test_driver_version_branch()
+    test_invalid_desired_file()
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
@@ -54,6 +55,14 @@ desired:
         )
         desired = load_desired(str(path))
         assert desired.driver_major == "595"
+
+
+def test_invalid_desired_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "desired.yaml"
+        path.write_text("not yaml\n", encoding="utf-8")
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            assert main(["plan", "--desired", str(path)]) == 2
 
 
 def test_plan() -> None:
