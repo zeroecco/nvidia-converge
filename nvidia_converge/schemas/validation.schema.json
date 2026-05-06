@@ -4,11 +4,15 @@
   "title": "nvidia-converge validation result",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "valid", "desired"],
+  "required": ["schema_version", "generated_at", "valid", "desired"],
   "properties": {
     "schema_version": {
       "type": "string",
       "const": "1.0"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
     },
     "valid": {
       "type": "boolean",

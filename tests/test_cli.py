@@ -68,6 +68,8 @@ def test_validate_json_outputs_machine_readable_payload(capsys):
     captured = capsys.readouterr()
     assert rc == 0
     payload = json.loads(captured.out)
+    assert payload["schema_version"] == "1.0"
+    assert "generated_at" in payload
     assert payload["valid"] is True
     assert payload["desired"]["driver"] == "580-open"
 
@@ -79,6 +81,8 @@ def test_validate_writes_machine_readable_payload(capsys, tmp_path):
     assert rc == 0
     assert "Desired state: valid" in captured.out
     payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "1.0"
+    assert "generated_at" in payload
     assert payload["valid"] is True
     assert payload["desired"]["driver"] == "580-open"
 

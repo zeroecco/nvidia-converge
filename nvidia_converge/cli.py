@@ -150,7 +150,7 @@ def emit_report(command: str, report: Report, out_path: str | None, json_stdout:
 
 
 def emit_validation(desired: DesiredState, out_path: str | None, json_stdout: bool) -> None:
-    payload = {"schema_version": "1.0", "valid": True, "desired": asdict(desired)}
+    payload = {"schema_version": "1.0", "generated_at": utc_now(), "valid": True, "desired": asdict(desired)}
     text = json.dumps(payload, indent=2, sort_keys=True)
     if out_path:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
