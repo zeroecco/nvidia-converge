@@ -25,6 +25,8 @@ def main_tests() -> int:
     test_invalid_desired_file()
     test_apply_requires_root()
     test_version_flag()
+    test_schema_command()
+    test_report_has_schema_required_keys()
     test_plan()
     test_cli_plan_report()
     test_install_dry_run()
@@ -84,6 +86,24 @@ def test_version_flag() -> None:
             main(["--version"])
     except SystemExit as exc:
         assert exc.code == 0
+
+
+def test_schema_command() -> None:
+    out = StringIO()
+    with redirect_stdout(out):
+        assert main(["schema", "report"]) == 0
+    schema = json.loads(out.getvalue())
+    assert schema["title"] == "nvidia-converge report"
+
+
+def test_report_has_schema_required_keys() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "plan.json"
+        with redirect_stdout(StringIO()):
+            assert main(["plan", "--out", str(out)]) == 0
+        report = json.loads(out.read_text(encoding="utf-8"))
+        schema = json.loads(Path("schemas/report.schema.json").read_text(encoding="utf-8"))
+        assert set(schema["required"]).issubset(report)
 
 
 def test_plan() -> None:

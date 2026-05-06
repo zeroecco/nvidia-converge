@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zeroecco/nvidia-converge/schemas/desired.schema.json",
+  "title": "nvidia-converge desired state",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "desired": {
+      "$ref": "#/$defs/desired"
+    }
+  },
+  "required": ["desired"],
+  "$defs": {
+    "desired": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "default": "compute"
+        },
+        "driver": {
+          "type": "string",
+          "default": "580-open",
+          "examples": ["580-open", "595.71.05"]
+        },
+        "cuda_compat": {
+          "type": "string",
+          "default": "13.0"
+        },
+        "secure_boot": {
+          "type": "string",
+          "enum": ["signed", "unsigned", "disabled"],
+          "default": "signed"
+        },
+        "container_runtime": {
+          "type": "string",
+          "enum": ["docker"],
+          "default": "docker"
+        },
+        "fabric_manager": {
+          "type": "boolean",
+          "default": true
+        },
+        "mig": {
+          "type": "string",
+          "enum": ["disabled", "enabled"],
+          "default": "disabled"
+        },
+        "kernel_policy": {
+          "type": "string",
+          "enum": ["pin-compatible"],
+          "default": "pin-compatible"
+        }
+      }
+    }
+  }
+}

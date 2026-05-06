@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zeroecco/nvidia-converge/schemas/report.schema.json",
+  "title": "nvidia-converge report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "desired", "audit", "findings", "plan", "command_results", "verification", "rollback", "sbom"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "desired": {
+      "$ref": "#/$defs/desired"
+    },
+    "audit": {
+      "anyOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/audit"}
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/finding"}
+    },
+    "plan": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/plan_action"}
+    },
+    "command_results": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/command_result"}
+    },
+    "verification": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/verification"}
+    },
+    "rollback": {
+      "anyOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/rollback"}
+      ]
+    },
+    "sbom": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/package"}
+    }
+  },
+  "$defs": {
+    "desired": {
+      "type": "object",
+      "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "fabric_manager", "mig", "kernel_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "role": {"type": "string"},
+        "driver": {"type": "string"},
+        "cuda_compat": {"type": "string"},
+        "secure_boot": {"type": "string"},
+        "container_runtime": {"type": "string"},
+        "fabric_manager": {"type": "boolean"},
+        "mig": {"type": "string"},
+        "kernel_policy": {"type": "string"}
+      }
+    },
+    "command_result": {
+      "type": "object",
+      "required": ["command", "returncode", "stdout", "stderr", "skipped", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {"type": "array", "items": {"type": "string"}},
+        "returncode": {"type": ["integer", "null"]},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"},
+        "skipped": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "severity", "summary", "detail", "evidence", "remediation"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "severity": {"type": "string", "enum": ["info", "warning", "error"]},
+        "summary": {"type": "string"},
+        "detail": {"type": "string"},
+        "evidence": {"type": "object"},
+        "remediation": {"type": ["string", "null"]}
+      }
+    },
+    "package": {
+      "type": "object",
+      "required": ["name", "version", "manager", "installed"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": ["string", "null"]},
+        "manager": {"type": ["string", "null"]},
+        "installed": {"type": "boolean"}
+      }
+    },
+    "kernel": {
+      "type": "object",
+      "required": ["running", "headers_installed", "compiler", "secure_boot_enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "running": {"type": "string"},
+        "headers_installed": {"type": "boolean"},
+        "compiler": {"type": ["string", "null"]},
+        "secure_boot_enabled": {"type": ["boolean", "null"]}
+      }
+    },
+    "module": {
+      "type": "object",
+      "required": ["loaded", "version", "open_module", "signed", "devices"],
+      "additionalProperties": false,
+      "properties": {
+        "loaded": {"type": "boolean"},
+        "version": {"type": ["string", "null"]},
+        "open_module": {"type": ["boolean", "null"]},
+        "signed": {"type": ["boolean", "null"]},
+        "devices": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["docker_installed", "nvidia_container_runtime_installed", "docker_gpus_usable"],
+      "additionalProperties": false,
+      "properties": {
+        "docker_installed": {"type": "boolean"},
+        "nvidia_container_runtime_installed": {"type": "boolean"},
+        "docker_gpus_usable": {"type": ["boolean", "null"]}
+      }
+    },
+    "audit": {
+      "type": "object",
+      "required": ["timestamp", "os_id", "os_version", "package_manager", "kernel", "module", "runtime", "packages", "nvidia_smi", "nvml", "fabric_manager_active", "mig_mode"],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": {"type": "string", "format": "date-time"},
+        "os_id": {"type": ["string", "null"]},
+        "os_version": {"type": ["string", "null"]},
+        "package_manager": {"type": ["string", "null"]},
+        "kernel": {"$ref": "#/$defs/kernel"},
+        "module": {"$ref": "#/$defs/module"},
+        "runtime": {"$ref": "#/$defs/runtime"},
+        "packages": {"type": "array", "items": {"$ref": "#/$defs/package"}},
+        "nvidia_smi": {"$ref": "#/$defs/command_result"},
+        "nvml": {"$ref": "#/$defs/command_result"},
+        "fabric_manager_active": {"type": ["boolean", "null"]},
+        "mig_mode": {"type": ["string", "null"]}
+      }
+    },
+    "plan_action": {
+      "type": "object",
+      "required": ["id", "description", "commands", "destructive", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string"},
+        "description": {"type": "string"},
+        "commands": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "destructive": {"type": "boolean"},
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["name", "ok", "command", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "ok": {"type": "boolean"},
+        "command": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/command_result"}]},
+        "detail": {"type": ["string", "null"]}
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "required": ["path", "packages", "kernel", "module_version", "commands"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": ["string", "null"]},
+        "packages": {"type": "array", "items": {"$ref": "#/$defs/package"}},
+        "kernel": {"type": "string"},
+        "module_version": {"type": ["string", "null"]},
+        "commands": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+      }
+    }
+  }
+}

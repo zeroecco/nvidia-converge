@@ -14,6 +14,7 @@ from .planner import build_plan, lock_actions
 from .report import report_json, sbom_from_audit, write_report
 from .rollback import apply_rollback, create_snapshot, load_snapshot
 from .runner import CommandRunner
+from .schemas import schema_json
 from .verify import verify_stack
 
 
@@ -24,10 +25,16 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("doctor", "plan", "install", "verify", "lock", "snapshot"):
         _add_common_args(sub.add_parser(name))
+    schema = sub.add_parser("schema")
+    schema.add_argument("name", choices=("desired", "report"), help="Schema to print.")
     rollback = sub.add_parser("rollback")
     _add_common_args(rollback)
     rollback.add_argument("--snapshot", required=True, help="Rollback snapshot JSON created by install or snapshot.")
     args = parser.parse_args(argv)
+
+    if args.command == "schema":
+        print(schema_json(args.name))
+        return 0
 
     desired_path = getattr(args, "desired", None)
     out_path = getattr(args, "out", None)

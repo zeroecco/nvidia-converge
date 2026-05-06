@@ -31,6 +31,7 @@ python3 -m nvidia_converge plan --out report.json
 sudo python3 -m nvidia_converge install --apply --out report.json
 python3 -m nvidia_converge verify --out verify.json
 python3 -m nvidia_converge lock --apply --out lock.json
+python3 -m nvidia_converge schema report
 sudo python3 -m nvidia_converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
 ```
 
@@ -88,3 +89,10 @@ git push origin v0.1.0
 ## Report
 
 Every command can write a JSON report with audit findings, diagnostics, proposed or applied actions, verification results, rollback snapshot metadata, and an SBOM-style package/module inventory.
+
+JSON Schemas are available in `schemas/` and through the CLI:
+
+```bash
+nvidia-converge schema desired
+nvidia-converge schema report
+```

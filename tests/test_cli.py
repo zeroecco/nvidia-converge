@@ -13,6 +13,14 @@ def test_version_flag(capsys):
     assert captured.out.startswith("nvidia-converge ")
 
 
+def test_schema_command_outputs_json(capsys):
+    rc = main(["schema", "desired"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    schema = json.loads(captured.out)
+    assert schema["title"] == "nvidia-converge desired state"
+
+
 def test_lock_defaults_to_human_output(capsys, tmp_path):
     desired = tmp_path / "desired.yaml"
     desired.write_text(
