@@ -81,3 +81,55 @@ desired:
     )
     with pytest.raises(DesiredConfigError, match="fabric_manager"):
         load_desired(str(path))
+
+
+def test_rejects_unsupported_container_runtime(tmp_path):
+    path = tmp_path / "desired.yaml"
+    path.write_text(
+        """
+desired:
+  container_runtime: dockre
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(DesiredConfigError, match="container_runtime"):
+        load_desired(str(path))
+
+
+def test_rejects_unsupported_mig_mode(tmp_path):
+    path = tmp_path / "desired.yaml"
+    path.write_text(
+        """
+desired:
+  mig: disabledd
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(DesiredConfigError, match="mig"):
+        load_desired(str(path))
+
+
+def test_rejects_invalid_driver_format(tmp_path):
+    path = tmp_path / "desired.yaml"
+    path.write_text(
+        """
+desired:
+  driver: latest
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(DesiredConfigError, match="driver"):
+        load_desired(str(path))
+
+
+def test_rejects_invalid_cuda_compat_format(tmp_path):
+    path = tmp_path / "desired.yaml"
+    path.write_text(
+        """
+desired:
+  cuda_compat: thirteen
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(DesiredConfigError, match="cuda_compat"):
+        load_desired(str(path))

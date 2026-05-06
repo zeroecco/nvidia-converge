@@ -24,15 +24,18 @@
       "properties": {
         "role": {
           "type": "string",
+          "enum": ["compute"],
           "default": "compute"
         },
         "driver": {
           "type": "string",
+          "pattern": "^\\d+(?:-open|\\.\\d+(?:\\.\\d+)?)?$",
           "default": "580-open",
           "examples": ["580-open", "595.71.05"]
         },
         "cuda_compat": {
           "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
           "default": "13.0"
         },
         "secure_boot": {

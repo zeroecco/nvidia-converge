@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,6 +10,15 @@ from .models import DesiredState
 
 DEFAULT_DESIRED = DesiredState()
 _DESIRED_FIELDS = set(DesiredState.__dataclass_fields__)
+_ALLOWED_VALUES = {
+    "role": {"compute"},
+    "secure_boot": {"signed", "unsigned", "disabled"},
+    "container_runtime": {"docker"},
+    "mig": {"disabled", "enabled"},
+    "kernel_policy": {"pin-compatible"},
+}
+_DRIVER_PATTERN = re.compile(r"^\d+(?:-open|\.\d+(?:\.\d+)?)?$")
+_CUDA_COMPAT_PATTERN = re.compile(r"^\d+\.\d+$")
 
 
 class DesiredConfigError(ValueError):
@@ -96,4 +106,17 @@ def _build_desired(values: dict[str, Any]) -> DesiredState:
     for field, value in values.items():
         if field != "fabric_manager" and not isinstance(value, str):
             raise DesiredConfigError(f"desired.{field} must be a string")
-    return DesiredState(**values)
+    desired = DesiredState(**values)
+    _validate_desired(desired)
+    return desired
+
+
+def _validate_desired(desired: DesiredState) -> None:
+    for field, allowed in _ALLOWED_VALUES.items():
+        value = getattr(desired, field)
+        if value not in allowed:
+            raise DesiredConfigError(f"desired.{field} must be one of: {', '.join(sorted(allowed))}")
+    if not _DRIVER_PATTERN.match(desired.driver):
+        raise DesiredConfigError("desired.driver must be a driver branch like 580-open or a version like 595.71.05")
+    if not _CUDA_COMPAT_PATTERN.match(desired.cuda_compat):
+        raise DesiredConfigError("desired.cuda_compat must be a major.minor version like 13.0")

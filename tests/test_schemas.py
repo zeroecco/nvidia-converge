@@ -2,6 +2,7 @@ import json
 from importlib import resources
 
 import jsonschema
+import pytest
 
 import nvidia_converge
 from nvidia_converge.cli import main
@@ -47,6 +48,21 @@ def test_desired_schema_accepts_bare_desired_object():
         "kernel_policy": "pin-compatible",
     }
     jsonschema.validate(desired, load_schema("desired"))
+
+
+def test_desired_schema_rejects_unsupported_values():
+    desired = {
+        "role": "compute",
+        "driver": "latest",
+        "cuda_compat": "13",
+        "secure_boot": "signed",
+        "container_runtime": "dockre",
+        "fabric_manager": True,
+        "mig": "disabledd",
+        "kernel_policy": "pin-compatible",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(desired, load_schema("desired"))
 
 
 def test_integration_results_example_validates():

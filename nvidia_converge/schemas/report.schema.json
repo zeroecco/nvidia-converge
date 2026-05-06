@@ -56,14 +56,14 @@
       "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "fabric_manager", "mig", "kernel_policy"],
       "additionalProperties": false,
       "properties": {
-        "role": {"type": "string"},
-        "driver": {"type": "string"},
-        "cuda_compat": {"type": "string"},
-        "secure_boot": {"type": "string"},
-        "container_runtime": {"type": "string"},
+        "role": {"type": "string", "enum": ["compute"]},
+        "driver": {"type": "string", "pattern": "^\\d+(?:-open|\\.\\d+(?:\\.\\d+)?)?$"},
+        "cuda_compat": {"type": "string", "pattern": "^\\d+\\.\\d+$"},
+        "secure_boot": {"type": "string", "enum": ["signed", "unsigned", "disabled"]},
+        "container_runtime": {"type": "string", "enum": ["docker"]},
         "fabric_manager": {"type": "boolean"},
-        "mig": {"type": "string"},
-        "kernel_policy": {"type": "string"}
+        "mig": {"type": "string", "enum": ["disabled", "enabled"]},
+        "kernel_policy": {"type": "string", "enum": ["pin-compatible"]}
       }
     },
     "command_result": {
