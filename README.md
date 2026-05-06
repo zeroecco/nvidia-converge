@@ -1,5 +1,7 @@
 # nvidia-converge
 
+[![CI](https://github.com/zeroecco/nvidia-converge/actions/workflows/ci.yml/badge.svg)](https://github.com/zeroecco/nvidia-converge/actions/workflows/ci.yml)
+
 `nvidia-converge` is a node-level NVIDIA driver stack reconciler. It reads a desired state, audits the host, explains breakage, previews package/kernel/module changes, optionally converges the machine, validates the GPU stack, pins compatibility-sensitive packages, records rollback metadata, and emits a machine-readable compliance report.
 
 Default desired state:
