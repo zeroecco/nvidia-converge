@@ -29,6 +29,27 @@ def test_rpm_rollback_only_restores_relevant_packages():
     assert commands == [["dnf", "downgrade", "-y", "nvidia-open-595-595.71.05-1", "nvidia-container-toolkit-1.19.0-1"]]
 
 
+def test_zypper_rollback_restores_versioned_rpm_packages():
+    commands = _rollback_commands(
+        [
+            PackageInfo("nvidia-open-595", "595.71.05-1", "rpm", True),
+            PackageInfo("nvidia-container-toolkit", "1.19.0-1", "rpm", True),
+            PackageInfo("bash", "5.2-1", "rpm", True),
+        ],
+        "zypper",
+    )
+    assert commands == [
+        [
+            "zypper",
+            "--non-interactive",
+            "install",
+            "--oldpackage",
+            "nvidia-open-595=595.71.05-1",
+            "nvidia-container-toolkit=1.19.0-1",
+        ]
+    ]
+
+
 def test_load_snapshot_rejects_missing_required_fields(tmp_path):
     path = tmp_path / "snapshot.json"
     path.write_text("{}", encoding="utf-8")

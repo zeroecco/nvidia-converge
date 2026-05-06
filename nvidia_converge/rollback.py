@@ -71,4 +71,7 @@ def _rollback_commands(packages: list[PackageInfo], pm: str | None) -> list[list
     if pm in {"dnf", "yum"}:
         specs = [f"{pkg.name}-{pkg.version}" for pkg in installed if pkg.manager == "rpm"]
         return [[pm, "downgrade", "-y", *specs]] if specs else []
+    if pm == "zypper":
+        specs = [f"{pkg.name}={pkg.version}" for pkg in installed if pkg.manager == "rpm"]
+        return [["zypper", "--non-interactive", "install", "--oldpackage", *specs]] if specs else []
     return []

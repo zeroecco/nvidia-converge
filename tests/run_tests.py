@@ -41,6 +41,7 @@ def main_tests() -> int:
     test_install_dry_run_does_not_write_rollback()
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
+    test_zypper_rollback_commands()
     test_zypper_lock_plan()
     print("all tests passed")
     return 0
@@ -229,6 +230,17 @@ def test_rollback_filters_unrelated_packages() -> None:
         "apt-get",
     )
     assert commands == [["apt-get", "install", "-y", "nvidia-driver-580-open=580.126.16-1"]]
+
+
+def test_zypper_rollback_commands() -> None:
+    commands = _rollback_commands(
+        [
+            PackageInfo("nvidia-open-595", "595.71.05-1", "rpm", True),
+            PackageInfo("bash", "5.2-1", "rpm", True),
+        ],
+        "zypper",
+    )
+    assert commands == [["zypper", "--non-interactive", "install", "--oldpackage", "nvidia-open-595=595.71.05-1"]]
 
 
 def test_zypper_lock_plan() -> None:

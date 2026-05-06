@@ -47,8 +47,8 @@ PACKAGE_MANAGERS: dict[str, PackageManagerSupport] = {
         "plan": True,
         "install": True,
         "lock": True,
-        "rollback": "not implemented",
-        "notes": "Uses rpm inventory and zypper addlock; rollback command generation is not implemented.",
+        "rollback": "best-effort package version restore",
+        "notes": "Uses rpm inventory, zypper addlock, and zypper install --oldpackage for rollback.",
     },
 }
 CONTAINER_RUNTIMES = ["docker"]
