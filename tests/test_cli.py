@@ -31,6 +31,18 @@ def test_schema_command_outputs_json(capsys):
     assert schema["title"] == "nvidia-converge desired state"
 
 
+def test_broken_stdout_exits_without_traceback(monkeypatch):
+    class BrokenStdout:
+        def write(self, text):
+            raise BrokenPipeError
+
+        def flush(self):
+            return None
+
+    monkeypatch.setattr("sys.stdout", BrokenStdout())
+    assert main(["schema", "desired"]) == 1
+
+
 def test_support_command_outputs_human_summary(capsys):
     rc = main(["support"])
     captured = capsys.readouterr()

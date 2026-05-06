@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -23,6 +24,16 @@ from .verify import verify_stack
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    try:
+        return _main(argv)
+    except BrokenPipeError:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        return 1
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nvidia-converge", description="Converge a node to a desired NVIDIA driver stack.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _add_common_args(parser)

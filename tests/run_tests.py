@@ -36,6 +36,7 @@ def main_tests() -> int:
     test_package_version_matches_cli_version()
     test_validate_command()
     test_schema_command()
+    test_broken_stdout_exits_without_traceback()
     test_validation_schema_command()
     test_integration_results_schema_command()
     test_support_command()
@@ -157,6 +158,15 @@ def test_schema_command() -> None:
         assert main(["schema", "report"]) == 0
     schema = json.loads(out.getvalue())
     assert schema["title"] == "nvidia-converge report"
+
+
+def test_broken_stdout_exits_without_traceback() -> None:
+    stdout = sys.stdout
+    try:
+        sys.stdout = _BrokenStdout()
+        assert main(["schema", "report"]) == 1
+    finally:
+        sys.stdout = stdout
 
 
 def test_validation_schema_command() -> None:
@@ -385,6 +395,15 @@ class _FakeRunner:
         result = CommandResult(command, self.returncodes.pop(0))
         self.results.append(result)
         return result
+
+
+class _BrokenStdout:
+    def write(self, text: str) -> None:
+        del text
+        raise BrokenPipeError
+
+    def flush(self) -> None:
+        return None
 
 
 if __name__ == "__main__":
