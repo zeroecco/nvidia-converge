@@ -2,7 +2,7 @@
 
 `nvidia-converge` has unit, schema, packaging, and CLI smoke coverage in CI. Host mutation still needs validation on disposable GPU nodes before an apply path should be treated as fully production-proven.
 
-The manual GitHub Actions workflow `.github/workflows/gpu-integration.yml` runs the executable integration sequence on self-hosted runners labeled `self-hosted`, `nvidia-gpu`, and `disposable`.
+The manual GitHub Actions workflow `.github/workflows/gpu-integration.yml` runs the executable integration sequence on self-hosted runners labeled `self-hosted`, `nvidia-gpu`, and `disposable`. With `apply=false`, it performs non-mutating plan/report validation. With `apply=true`, it runs install, verify, lock, rollback, and post-rollback verify.
 
 ## Required Test Nodes
 

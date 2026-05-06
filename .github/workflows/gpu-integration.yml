@@ -8,7 +8,7 @@ on:
         required: false
         default: "examples/compute-580-open.yaml"
       apply:
-        description: "Run host-mutating install/verify/lock steps"
+        description: "Run host-mutating install/verify/lock/rollback steps"
         required: true
         type: boolean
         default: false
@@ -55,6 +55,20 @@ jobs:
         if: ${{ inputs.apply }}
         run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge install --desired "${{ inputs.desired }}" --apply --out artifacts/reports/install.json
 
+      - name: Locate rollback snapshot
+        if: ${{ inputs.apply }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/reports/install.json").read_text(encoding="utf-8"))
+          snapshot = report.get("rollback", {}).get("path")
+          if not snapshot:
+              raise SystemExit("install report did not include a persisted rollback snapshot path")
+          Path("artifacts/reports/rollback-snapshot-path.txt").write_text(snapshot + "\n", encoding="utf-8")
+          PY
+
       - name: Verify
         if: ${{ inputs.apply }}
         run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify.json
@@ -62,6 +76,17 @@ jobs:
       - name: Lock
         if: ${{ inputs.apply }}
         run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge lock --desired "${{ inputs.desired }}" --apply --out artifacts/reports/lock.json
+
+      - name: Rollback
+        if: ${{ inputs.apply }}
+        shell: bash
+        run: |
+          snapshot="$(cat artifacts/reports/rollback-snapshot-path.txt)"
+          sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge rollback --desired "${{ inputs.desired }}" --snapshot "$snapshot" --apply --out artifacts/reports/rollback.json
+
+      - name: Verify after rollback
+        if: ${{ inputs.apply }}
+        run: sudo env PYTHONPATH="$PWD" python3 -m nvidia_converge verify --desired "${{ inputs.desired }}" --apply --out artifacts/reports/verify-after-rollback.json
 
       - name: Capture post-state
         if: always()
