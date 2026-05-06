@@ -1,6 +1,8 @@
 from nvidia_converge.models import PackageInfo
 from nvidia_converge.rollback import RollbackSnapshotError, _rollback_commands, load_snapshot
 
+import json
+
 import pytest
 
 
@@ -54,4 +56,46 @@ def test_load_snapshot_rejects_missing_required_fields(tmp_path):
     path = tmp_path / "snapshot.json"
     path.write_text("{}", encoding="utf-8")
     with pytest.raises(RollbackSnapshotError, match="missing required"):
+        load_snapshot(str(path))
+
+
+def test_load_snapshot_accepts_valid_snapshot(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps(
+            {
+                "path": "/var/lib/nvidia-converge/snapshots/example.json",
+                "packages": [
+                    {"name": "nvidia-open-595", "version": "595.71.05-1", "manager": "rpm", "installed": True}
+                ],
+                "kernel": "6.8.0-111-generic",
+                "module_version": "595.71.05",
+                "commands": [["zypper", "--non-interactive", "install", "--oldpackage", "nvidia-open-595=595.71.05-1"]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot = load_snapshot(str(path))
+    assert snapshot.kernel == "6.8.0-111-generic"
+    assert snapshot.packages[0].name == "nvidia-open-595"
+    assert snapshot.commands[0][0] == "zypper"
+
+
+def test_load_snapshot_rejects_invalid_package_entry(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps({"packages": [{"name": "nvidia-open-595", "installed": "yes"}], "kernel": "6.8.0", "commands": [["true"]]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RollbackSnapshotError, match=r"packages\[0\].installed"):
+        load_snapshot(str(path))
+
+
+def test_load_snapshot_rejects_invalid_command_entry(tmp_path):
+    path = tmp_path / "snapshot.json"
+    path.write_text(
+        json.dumps({"packages": [], "kernel": "6.8.0", "commands": [["zypper", ""]]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(RollbackSnapshotError, match=r"commands\[0\] entries"):
         load_snapshot(str(path))

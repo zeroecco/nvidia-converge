@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 from .models import CommandResult, HostAudit, PackageInfo, RollbackSnapshot, utc_now
 from .runner import CommandRunner
@@ -49,14 +49,56 @@ def load_snapshot(path: str) -> RollbackSnapshot:
     missing = [key for key in ("kernel", "packages", "commands") if key not in data]
     if missing:
         raise RollbackSnapshotError(f"rollback snapshot missing required field(s): {', '.join(missing)}")
-    if not isinstance(data["packages"], list) or not isinstance(data["commands"], list):
-        raise RollbackSnapshotError("rollback snapshot packages and commands must be arrays")
-    try:
-        packages = [PackageInfo(**pkg) for pkg in data.get("packages", [])]
-    except TypeError as exc:
-        raise RollbackSnapshotError(f"invalid rollback snapshot package entry: {exc}") from exc
-    commands = cast(list[list[str]], data.get("commands", []))
-    return RollbackSnapshot(path=data.get("path", path), packages=packages, kernel=data["kernel"], module_version=data.get("module_version"), commands=commands)
+    snapshot_path = _optional_string(data.get("path"), "path") or path
+    kernel = _required_string(data["kernel"], "kernel")
+    module_version = _optional_string(data.get("module_version"), "module_version")
+    packages = _load_packages(data["packages"])
+    commands = _load_commands(data["commands"])
+    return RollbackSnapshot(path=snapshot_path, packages=packages, kernel=kernel, module_version=module_version, commands=commands)
+
+
+def _load_packages(value: Any) -> list[PackageInfo]:
+    if not isinstance(value, list):
+        raise RollbackSnapshotError("rollback snapshot packages must be an array")
+    packages: list[PackageInfo] = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            raise RollbackSnapshotError(f"rollback snapshot packages[{index}] must be an object")
+        name = _required_string(entry.get("name"), f"packages[{index}].name")
+        version = _optional_string(entry.get("version"), f"packages[{index}].version")
+        manager = _optional_string(entry.get("manager"), f"packages[{index}].manager")
+        installed = entry.get("installed")
+        if not isinstance(installed, bool):
+            raise RollbackSnapshotError(f"rollback snapshot packages[{index}].installed must be a boolean")
+        packages.append(PackageInfo(name=name, version=version, manager=manager, installed=installed))
+    return packages
+
+
+def _load_commands(value: Any) -> list[list[str]]:
+    if not isinstance(value, list):
+        raise RollbackSnapshotError("rollback snapshot commands must be an array")
+    commands: list[list[str]] = []
+    for index, command in enumerate(value):
+        if not isinstance(command, list) or not command:
+            raise RollbackSnapshotError(f"rollback snapshot commands[{index}] must be a non-empty array")
+        if not all(isinstance(part, str) and part for part in command):
+            raise RollbackSnapshotError(f"rollback snapshot commands[{index}] entries must be non-empty strings")
+        commands.append(command)
+    return commands
+
+
+def _required_string(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise RollbackSnapshotError(f"rollback snapshot {name} must be a non-empty string")
+    return value
+
+
+def _optional_string(value: Any, name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise RollbackSnapshotError(f"rollback snapshot {name} must be null or a non-empty string")
+    return value
 
 
 def apply_rollback(snapshot: RollbackSnapshot, runner: CommandRunner) -> list[CommandResult]:
