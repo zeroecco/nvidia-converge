@@ -1,4 +1,4 @@
-from nvidia_converge.audit import _parse_dpkg_packages, _parse_rpm_packages
+from nvidia_converge.audit import _mig_mode, _parse_dpkg_packages, _parse_rpm_packages
 
 
 def test_parse_dpkg_packages_filters_sorts_and_deduplicates():
@@ -29,3 +29,14 @@ nvidia-open-595\t595.71.05-1
     )
     assert [pkg.name for pkg in packages] == ["cuda-compat-13-0", "nvidia-container-toolkit", "nvidia-open-595"]
     assert [pkg.manager for pkg in packages] == ["rpm", "rpm", "rpm"]
+
+
+def test_mig_mode_parses_query_output():
+    assert _mig_mode("Enabled\nDisabled\n") == "enabled"
+    assert _mig_mode("Disabled\nDisabled\n") == "disabled"
+    assert _mig_mode("N/A\n") == "disabled"
+
+
+def test_mig_mode_parses_verbose_output():
+    assert _mig_mode("GPU 00000000:01:00.0\n    MIG Mode                    : Enabled\n") == "enabled"
+    assert _mig_mode("GPU 00000000:01:00.0\n    MIG Mode                    : Disabled\n") == "disabled"

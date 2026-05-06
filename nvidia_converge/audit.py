@@ -19,7 +19,7 @@ def audit_host(runner: CommandRunner) -> HostAudit:
     nvidia_smi = runner.run(["nvidia-smi"], allow_fail=True) if runner.exists("nvidia-smi") else CommandResult(["nvidia-smi"], 127, stderr="not found")
     nvml = _audit_nvml(runner)
     fabric_manager_active = _service_active(runner, "nvidia-fabricmanager")
-    mig_mode = _mig_mode(nvidia_smi.stdout)
+    mig_mode = _audit_mig_mode(runner, nvidia_smi.stdout)
     return HostAudit(
         timestamp=utc_now(),
         os_id=os_id,
@@ -154,10 +154,23 @@ def _service_active(runner: CommandRunner, service: str) -> bool | None:
     return None
 
 
+def _audit_mig_mode(runner: CommandRunner, nvidia_smi_output: str) -> str | None:
+    if runner.exists("nvidia-smi"):
+        result = runner.run(["nvidia-smi", "--query-gpu=mig.mode.current", "--format=csv,noheader"], allow_fail=True)
+        if result.returncode == 0:
+            queried = _mig_mode(result.stdout)
+            if queried:
+                return queried
+    return _mig_mode(nvidia_smi_output)
+
+
 def _mig_mode(nvidia_smi_output: str) -> str | None:
     lowered = nvidia_smi_output.lower()
-    if "mig mode" not in lowered:
-        return None
+    modes = [line.strip().lower() for line in nvidia_smi_output.splitlines()]
+    if any(mode == "enabled" for mode in modes):
+        return "enabled"
+    if modes and all(mode in {"disabled", "n/a"} for mode in modes):
+        return "disabled"
     if re.search(r"mig mode\s*:\s*enabled", lowered):
         return "enabled"
     if re.search(r"mig mode\s*:\s*disabled", lowered):
