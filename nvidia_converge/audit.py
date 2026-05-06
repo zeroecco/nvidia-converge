@@ -102,7 +102,7 @@ def _audit_packages(package_manager: str | None, runner: CommandRunner) -> list[
     if package_manager == "apt-get":
         result = runner.run(["dpkg-query", "-W", "-f=${Package}\t${Version}\n", "nvidia-*", "libnvidia-*", "cuda-*", "docker-ce", "nvidia-container-toolkit"], allow_fail=True)
         return _parse_dpkg_packages(result.stdout)
-    elif package_manager in {"dnf", "yum"}:
+    elif package_manager in {"dnf", "yum", "zypper"}:
         result = runner.run(["rpm", "-qa", "--qf", "%{NAME}\t%{VERSION}-%{RELEASE}\n"], allow_fail=True)
         return _parse_rpm_packages(result.stdout)
     return []

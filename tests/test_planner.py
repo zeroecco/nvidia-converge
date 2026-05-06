@@ -35,6 +35,15 @@ def test_lock_actions_pin_compatibility():
     assert "nvidia-driver-580-open" in locks[0].commands[0]
 
 
+def test_lock_actions_support_zypper():
+    audit = _audit()
+    audit.package_manager = "zypper"
+    locks = lock_actions(DesiredState(), audit)
+    assert locks[0].id == "lock.zypper"
+    assert locks[0].commands[0][0:3] == ["zypper", "--non-interactive", "addlock"]
+    assert "nvidia-open-580" in locks[0].commands[0]
+
+
 def _audit() -> HostAudit:
     return HostAudit(
         timestamp="2026-05-06T00:00:00+00:00",

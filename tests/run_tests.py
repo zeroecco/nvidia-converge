@@ -36,6 +36,7 @@ def main_tests() -> int:
     test_install_dry_run_does_not_write_rollback()
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
+    test_zypper_lock_plan()
     print("all tests passed")
     return 0
 
@@ -179,6 +180,13 @@ def test_rollback_filters_unrelated_packages() -> None:
         "apt-get",
     )
     assert commands == [["apt-get", "install", "-y", "nvidia-driver-580-open=580.126.16-1"]]
+
+
+def test_zypper_lock_plan() -> None:
+    audit = _audit()
+    audit.package_manager = "zypper"
+    locks = lock_actions(load_desired(None), audit)
+    assert locks[0].id == "lock.zypper"
 
 
 if __name__ == "__main__":

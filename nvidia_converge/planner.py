@@ -38,6 +38,9 @@ def lock_actions(desired: DesiredState, audit: HostAudit) -> list[PlanAction]:
     if pm in {"dnf", "yum"}:
         packages = _rpm_package_names(desired)
         return [PlanAction("lock.rpm", "Version-lock NVIDIA driver/toolkit packages and running kernel compatibility.", [[pm, "versionlock", "add", *packages]], reason="Prevent accidental driver/kernel/toolkit skew.")]
+    if pm == "zypper":
+        packages = _rpm_package_names(desired)
+        return [PlanAction("lock.zypper", "Lock NVIDIA driver/toolkit packages and running kernel compatibility.", [["zypper", "--non-interactive", "addlock", *packages]], reason="Prevent accidental driver/kernel/toolkit skew.")]
     return []
 
 
