@@ -23,7 +23,7 @@ nvidia-converge = "nvidia_converge.cli:main"
 include = ["nvidia_converge*"]
 
 [tool.setuptools.package-data]
-nvidia_converge = ["schemas/*.schema.json"]
+nvidia_converge = ["py.typed", "schemas/*.schema.json"]
 
 [tool.ruff]
 target-version = "py310"

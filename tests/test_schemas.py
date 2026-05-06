@@ -1,7 +1,9 @@
 import json
+from importlib import resources
 
 import jsonschema
 
+import nvidia_converge
 from nvidia_converge.cli import main
 from nvidia_converge.schemas import load_schema
 
@@ -51,3 +53,7 @@ def test_integration_results_example_validates():
     with open("integrations/results.example.json", encoding="utf-8") as handle:
         results = json.load(handle)
     jsonschema.validate(results, load_schema("integration-results"))
+
+
+def test_package_includes_pep561_marker():
+    assert resources.files(nvidia_converge).joinpath("py.typed").is_file()
