@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import nvidia_converge
-from nvidia_converge.cli import _run_plan_actions, main
+from nvidia_converge.cli import _commands_succeeded, _run_plan_actions, main
 from nvidia_converge.audit import _parse_dpkg_packages
 from nvidia_converge.desired import load_desired
 from nvidia_converge.doctor import diagnose
@@ -49,6 +49,7 @@ def main_tests() -> int:
     test_install_dry_run()
     test_install_dry_run_does_not_write_rollback()
     test_snapshot_dry_run_does_not_write_rollback()
+    test_failed_command_results_are_not_safe_for_post_install_verify()
     test_plan_execution_stops_after_failed_command()
     test_package_parser_deduplicates()
     test_rollback_filters_unrelated_packages()
@@ -274,6 +275,11 @@ def test_snapshot_dry_run_does_not_write_rollback() -> None:
             assert not Path("nvidia-converge-rollback.json").exists()
         finally:
             os.chdir(cwd)
+
+
+def test_failed_command_results_are_not_safe_for_post_install_verify() -> None:
+    assert _commands_succeeded([CommandResult(["apt-get", "install"], 100)]) is False
+    assert _commands_succeeded([CommandResult(["apt-get", "install"], None, skipped=True, reason="dry-run")]) is True
 
 
 def test_plan_execution_stops_after_failed_command() -> None:

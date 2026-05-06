@@ -105,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
         post_audit = audit_host(runner)
         report.audit = post_audit
         report.findings = diagnose(desired, post_audit)
-        report.verification = verify_stack(desired, runner, post_audit)
+        if _commands_succeeded(report.command_results):
+            report.verification = verify_stack(desired, runner, post_audit)
         report.sbom = sbom_from_audit(post_audit)
         emit_report(args.command, report, out_path, json_stdout, apply_changes)
         return _install_status(report)
@@ -181,8 +182,12 @@ def _status_from_results(results: list[CommandResult]) -> int:
     return 2 if failed else 0
 
 
+def _commands_succeeded(results: list[CommandResult]) -> bool:
+    return _status_from_results(results) == 0
+
+
 def _install_status(report: Report) -> int:
-    commands_ok = _status_from_results(report.command_results) == 0
+    commands_ok = _commands_succeeded(report.command_results)
     verification_ok = all(check.ok for check in report.verification)
     findings_ok = all(finding.severity.value != "error" for finding in report.findings)
     return 0 if commands_ok and verification_ok and findings_ok else 2

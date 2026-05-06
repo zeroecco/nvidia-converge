@@ -4,7 +4,7 @@ from pathlib import Path
 import tomllib
 
 import nvidia_converge
-from nvidia_converge.cli import _install_status, _run_plan_actions, main
+from nvidia_converge.cli import _commands_succeeded, _install_status, _run_plan_actions, main
 from nvidia_converge.human import render_human
 from nvidia_converge.models import CommandResult, DesiredState, PlanAction, Report, Verification
 
@@ -238,6 +238,11 @@ def test_install_status_passes_when_commands_and_checks_pass():
         verification=[Verification("nvidia-smi", True)],
     )
     assert _install_status(report) == 0
+
+
+def test_failed_command_results_are_not_safe_for_post_install_verify():
+    assert _commands_succeeded([CommandResult(["apt-get", "install"], 100)]) is False
+    assert _commands_succeeded([CommandResult(["apt-get", "install"], None, skipped=True, reason="dry-run")]) is True
 
 
 def test_plan_execution_stops_after_first_failed_mutating_command():
