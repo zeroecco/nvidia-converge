@@ -18,6 +18,25 @@ desired:
 
 ## Usage
 
+From a source checkout, run the CLI as a module:
+
+```bash
+python3 -m nvidia_converge doctor
+python3 -m nvidia_converge plan --out report.json
+sudo python3 -m nvidia_converge install --apply --out report.json
+python3 -m nvidia_converge verify --out verify.json
+python3 -m nvidia_converge lock --apply --out lock.json
+sudo python3 -m nvidia_converge rollback --snapshot /var/lib/nvidia-converge/snapshots/latest.json --apply
+```
+
+To install the console command in your current Python environment:
+
+```bash
+python3 -m pip install -e .
+```
+
+After installation, use the packaged command:
+
 ```bash
 nvidia-converge doctor
 nvidia-converge plan --out report.json
