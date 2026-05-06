@@ -89,7 +89,7 @@ python3 -m build
 
 ## Releases
 
-Tagged releases build and smoke-test wheel/sdist artifacts in GitHub Actions:
+Tagged releases build and smoke-test wheel/sdist artifacts in GitHub Actions, publish SHA256 checksums, and create GitHub artifact attestations:
 
 ```bash
 git tag v0.1.0

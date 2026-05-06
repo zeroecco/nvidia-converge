@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -37,6 +39,11 @@ jobs:
         run: |
           cd dist
           sha256sum * > SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
