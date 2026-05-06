@@ -72,6 +72,17 @@ def test_validate_json_outputs_machine_readable_payload(capsys):
     assert payload["desired"]["driver"] == "580-open"
 
 
+def test_validate_writes_machine_readable_payload(capsys, tmp_path):
+    out = tmp_path / "validation.json"
+    rc = main(["validate", "--desired", "examples/compute-580-open.yaml", "--out", str(out)])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Desired state: valid" in captured.out
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["valid"] is True
+    assert payload["desired"]["driver"] == "580-open"
+
+
 def test_lock_defaults_to_human_output(capsys, tmp_path):
     desired = tmp_path / "desired.yaml"
     desired.write_text(

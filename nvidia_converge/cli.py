@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from dataclasses import asdict
+from pathlib import Path
 
 from . import __version__
 from .audit import audit_host
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         _add_common_args(sub.add_parser(name))
     validate = sub.add_parser("validate")
     validate.add_argument("--desired", default=argparse.SUPPRESS, help="Desired-state JSON/YAML file.")
+    validate.add_argument("--out", default=argparse.SUPPRESS, help="Write machine-readable validation JSON to this path.")
     validate.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Print machine-readable validation details.")
     schema = sub.add_parser("schema")
     schema.add_argument("name", choices=("desired", "integration-results", "report"), help="Schema to print.")
@@ -58,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if args.command == "validate":
-        emit_validation(desired, getattr(args, "json", False))
+        emit_validation(desired, getattr(args, "out", None), getattr(args, "json", False))
         return 0
     if apply_changes and _requires_root(args.command) and hasattr(os, "geteuid") and os.geteuid() != 0:
         print(f"error: {args.command} --apply must be run as root", file=sys.stderr)
@@ -147,10 +149,14 @@ def emit_report(command: str, report: Report, out_path: str | None, json_stdout:
         print(render_human(command, report, apply=apply_changes))
 
 
-def emit_validation(desired: DesiredState, json_stdout: bool) -> None:
+def emit_validation(desired: DesiredState, out_path: str | None, json_stdout: bool) -> None:
     payload = {"schema_version": "1.0", "valid": True, "desired": asdict(desired)}
+    text = json.dumps(payload, indent=2, sort_keys=True)
+    if out_path:
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(out_path).write_text(text + "\n", encoding="utf-8")
     if json_stdout:
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        print(text)
         return
     print("nvidia-converge validate")
     print("Desired state: valid")
