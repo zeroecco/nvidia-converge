@@ -60,9 +60,15 @@ def _package_install_command(pm: str, desired: DesiredState, kernel: str) -> lis
 
 def _apt_package_names(desired: DesiredState) -> list[str]:
     driver_pkg = f"nvidia-driver-{desired.driver_major}-open" if desired.open_kernel_module else f"nvidia-driver-{desired.driver_major}"
-    return [driver_pkg, f"cuda-compat-{desired.cuda_compat.replace('.', '-')}", f"nvidia-fabricmanager-{desired.driver_major}", "nvidia-container-toolkit", "docker-ce"]
+    packages = [driver_pkg, f"cuda-compat-{desired.cuda_compat.replace('.', '-')}"]
+    if desired.fabric_manager:
+        packages.append(f"nvidia-fabricmanager-{desired.driver_major}")
+    return [*packages, "nvidia-container-toolkit", "docker-ce"]
 
 
 def _rpm_package_names(desired: DesiredState) -> list[str]:
     module_pkg = f"nvidia-open-{desired.driver_major}" if desired.open_kernel_module else f"nvidia-driver-{desired.driver_major}"
-    return [module_pkg, f"cuda-compat-{desired.cuda_compat.replace('.', '-')}", f"nvidia-fabric-manager-{desired.driver_major}", "nvidia-container-toolkit", "docker-ce"]
+    packages = [module_pkg, f"cuda-compat-{desired.cuda_compat.replace('.', '-')}"]
+    if desired.fabric_manager:
+        packages.append(f"nvidia-fabric-manager-{desired.driver_major}")
+    return [*packages, "nvidia-container-toolkit", "docker-ce"]

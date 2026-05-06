@@ -35,6 +35,24 @@ def test_lock_actions_pin_compatibility():
     assert "nvidia-driver-580-open" in locks[0].commands[0]
 
 
+def test_fabric_manager_false_omits_fabric_packages_and_service_action():
+    desired = DesiredState(fabric_manager=False)
+    audit = _audit()
+    plan = build_plan(desired, audit, diagnose(desired, audit))
+    ids = [action.id for action in plan]
+    assert "enable.fabric-manager" not in ids
+    flattened = [part for action in plan for command in action.commands for part in command]
+    assert "nvidia-fabricmanager-580" not in flattened
+
+
+def test_fabric_manager_false_omits_rpm_fabric_packages_from_locks():
+    desired = DesiredState(fabric_manager=False)
+    audit = _audit()
+    audit.package_manager = "zypper"
+    locks = lock_actions(desired, audit)
+    assert "nvidia-fabric-manager-580" not in locks[0].commands[0]
+
+
 def test_lock_actions_support_zypper():
     audit = _audit()
     audit.package_manager = "zypper"
