@@ -32,7 +32,9 @@ def diagnose(desired: DesiredState, audit: HostAudit) -> list[Finding]:
             findings.append(Finding("container-toolkit.missing", Severity.ERROR, "NVIDIA container toolkit is missing", "Docker cannot run GPU workloads without the NVIDIA container runtime/toolkit.", remediation="Install nvidia-container-toolkit and run nvidia-ctk runtime configure."))
         if audit.runtime.docker_gpus_usable is False:
             findings.append(Finding("docker.nvidia-runtime-missing", Severity.ERROR, "Docker is not configured with the NVIDIA runtime", "docker info does not list an nvidia runtime.", remediation="Run nvidia-ctk runtime configure --runtime=docker and restart Docker."))
-    if desired.fabric_manager and audit.fabric_manager_active is False:
+    if desired.fabric_manager and not _fabric_manager_package_installed(audit):
+        findings.append(Finding("fabric-manager.missing", Severity.ERROR, "NVIDIA Fabric Manager package is missing", "Desired state requires Fabric Manager to be installed.", remediation="Install the matching nvidia-fabricmanager package."))
+    elif desired.fabric_manager and audit.fabric_manager_active is False:
         findings.append(Finding("fabric-manager.inactive", Severity.WARNING, "NVIDIA Fabric Manager is inactive", "Desired state requires Fabric Manager to be installed and active.", remediation="Install and enable the matching nvidia-fabricmanager package."))
     if desired.mig == "disabled" and audit.mig_mode == "enabled":
         findings.append(Finding("mig.enabled", Severity.ERROR, "MIG mode is enabled", "Desired state requires MIG disabled.", remediation="Disable MIG with nvidia-smi -mig 0 and reset GPUs during a maintenance window."))
@@ -41,3 +43,9 @@ def diagnose(desired: DesiredState, audit: HostAudit) -> list[Finding]:
     if not findings:
         findings.append(Finding("stack.healthy", Severity.INFO, "NVIDIA stack matches observed desired-state checks", "No blocking audit issues were detected."))
     return findings
+
+
+def _fabric_manager_package_installed(audit: HostAudit) -> bool:
+    names = ("nvidia-fabricmanager", "nvidia-fabric-manager")
+    versioned_prefixes = ("nvidia-fabricmanager-", "nvidia-fabric-manager-")
+    return any(pkg.installed and (pkg.name in names or pkg.name.startswith(versioned_prefixes)) for pkg in audit.packages)

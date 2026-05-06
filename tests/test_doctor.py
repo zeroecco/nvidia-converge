@@ -5,6 +5,7 @@ from nvidia_converge.models import (
     HostAudit,
     KernelInfo,
     ModuleInfo,
+    PackageInfo,
     RuntimeInfo,
 )
 
@@ -18,7 +19,7 @@ def test_secure_boot_disabled_desired_state_flags_enabled_host():
         kernel=KernelInfo("6.8.0-test", headers_installed=True, compiler="/usr/bin/gcc", secure_boot_enabled=True),
         module=ModuleInfo(loaded=True, version="580.126.16", open_module=True, signed=True, devices=["/dev/nvidia0"]),
         runtime=RuntimeInfo(docker_installed=True, nvidia_container_runtime_installed=True, docker_gpus_usable=True),
-        packages=[],
+        packages=[PackageInfo("nvidia-fabricmanager-580", manager="apt", installed=True)],
         nvidia_smi=CommandResult(["nvidia-smi"], 0),
         nvml=CommandResult(["python3"], 0),
         fabric_manager_active=True,
@@ -35,6 +36,14 @@ def test_mig_enabled_desired_state_flags_disabled_host():
     assert [finding.id for finding in findings] == ["mig.disabled"]
 
 
+def test_fabric_manager_missing_is_blocking_when_desired():
+    audit = _healthy_audit()
+    audit.packages = []
+    audit.fabric_manager_active = False
+    findings = diagnose(DesiredState(), audit)
+    assert [finding.id for finding in findings] == ["fabric-manager.missing"]
+
+
 def _healthy_audit() -> HostAudit:
     return HostAudit(
         timestamp="2026-05-06T00:00:00+00:00",
@@ -44,7 +53,7 @@ def _healthy_audit() -> HostAudit:
         kernel=KernelInfo("6.8.0-test", headers_installed=True, compiler="/usr/bin/gcc", secure_boot_enabled=False),
         module=ModuleInfo(loaded=True, version="580.126.16", open_module=True, signed=True, devices=["/dev/nvidia0"]),
         runtime=RuntimeInfo(docker_installed=True, nvidia_container_runtime_installed=True, docker_gpus_usable=True),
-        packages=[],
+        packages=[PackageInfo("nvidia-fabricmanager-580", manager="apt", installed=True)],
         nvidia_smi=CommandResult(["nvidia-smi"], 0),
         nvml=CommandResult(["python3"], 0),
         fabric_manager_active=True,
