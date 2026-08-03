@@ -14,7 +14,7 @@ authors = [{ name = "nvidia-converge contributors" }]
 dependencies = []
 
 [project.optional-dependencies]
-test = ["build>=1.2", "jsonschema>=4", "mypy>=1.10", "pytest>=8", "ruff>=0.4"]
+test = ["build>=1.2", "jsonschema>=4", "mypy>=1.10", "pytest>=8", "PyYAML>=6", "ruff>=0.4"]
 
 [project.scripts]
 nvidia-converge = "nvidia_converge.cli:main"
