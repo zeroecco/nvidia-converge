@@ -5,8 +5,12 @@ from pathlib import Path
 import pytest
 
 
-def _module_cli(*arguments: str, isolated: bool = False) -> subprocess.CompletedProcess[str]:
-    command = [sys.executable]
+def _module_cli(
+    *arguments: str,
+    isolated: bool = False,
+    interpreter: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    command = [str(interpreter or sys.executable)]
     if isolated:
         command.append("-I")
     command.extend(("-m", "nvidia_converge", *arguments))
@@ -17,6 +21,60 @@ def _module_cli(*arguments: str, isolated: bool = False) -> subprocess.Completed
         capture_output=True,
         text=True,
     )
+
+
+@pytest.fixture(scope="module")
+def installed_module_python(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    source_root = Path(__file__).resolve().parents[1]
+    install_root = tmp_path_factory.mktemp("installed-module")
+    dist = install_root / "dist"
+    build = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--wheel",
+            "--no-isolation",
+            "--outdir",
+            str(dist),
+        ],
+        cwd=source_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+    wheels = list(dist.glob("nvidia_converge-*.whl"))
+    assert len(wheels) == 1
+
+    environment = install_root / "venv"
+    create = subprocess.run(
+        [sys.executable, "-m", "venv", str(environment)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert create.returncode == 0, create.stdout + create.stderr
+    interpreter = environment / (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    )
+    install = subprocess.run(
+        [
+            str(interpreter),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-index",
+            "--no-deps",
+            str(wheels[0]),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert install.returncode == 0, install.stdout + install.stderr
+    return interpreter
 
 
 def test_production_commands_use_isolated_versioned_interpreter() -> None:
@@ -63,8 +121,15 @@ def test_nonisolated_module_entry_rejects_applied_commands_before_desired_read(
     assert "must be run as root" not in result.stderr
 
 
-def test_isolated_module_entry_reaches_normal_applied_validation() -> None:
-    result = _module_cli("snapshot", "--apply", isolated=True)
+def test_isolated_module_entry_reaches_normal_applied_validation(
+    installed_module_python: Path,
+) -> None:
+    result = _module_cli(
+        "snapshot",
+        "--apply",
+        isolated=True,
+        interpreter=installed_module_python,
+    )
 
     assert result.returncode == 2
     assert result.stdout == ""

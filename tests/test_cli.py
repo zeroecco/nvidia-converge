@@ -3126,9 +3126,13 @@ def test_install_is_dry_run_without_apply(tmp_path):
     if report["command_results"]:
         assert skipped
     else:
-        assert [action["id"] for action in report["plan"]] == [
-            "unsupported.package-manager"
-        ]
+        assert rc == 2
+        assert report["plan"]
+        assert all(
+            action["id"].startswith("unsupported.")
+            and not action["commands"]
+            for action in report["plan"]
+        )
     assert all(result.get("reason") == "dry-run" for result in skipped)
     if report["rollback"] is not None:
         assert report["rollback"]["path"] is None

@@ -25,6 +25,9 @@ include = ["nvidia_converge*"]
 [tool.setuptools.package-data]
 nvidia_converge = ["py.typed", "probes/*.c", "schemas/*.schema.json"]
 
+[tool.pytest.ini_options]
+addopts = "--basetemp=.pytest-tmp"
+
 [tool.ruff]
 target-version = "py310"
 

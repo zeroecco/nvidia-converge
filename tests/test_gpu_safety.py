@@ -140,7 +140,7 @@ def test_bind_mounted_fd_alias_is_detected_by_character_device_identity(
     fd_root = tmp_path / "proc" / "315" / "fd"
     fd_root.mkdir(parents=True)
     descriptor = fd_root / "8"
-    descriptor.symlink_to(alias)
+    descriptor.symlink_to(os.path.relpath(alias, descriptor.parent))
     assert "nvidia" not in os.readlink(descriptor)
 
     result, workloads = probe_active_gpu_workloads(
