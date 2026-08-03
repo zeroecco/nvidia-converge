@@ -8,9 +8,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+TESTS_ROOT = Path(__file__).resolve().parent
+REPOSITORY_ROOT = TESTS_ROOT.parent
+sys.path[:0] = [str(REPOSITORY_ROOT), str(TESTS_ROOT)]
 
-from test_planner import _audit, _stage_policy, _suse_audit
+from planner_fixtures import _audit, _stage_policy, _suse_audit
 
 import nvidia_converge
 from nvidia_converge.audit import _parse_dpkg_packages

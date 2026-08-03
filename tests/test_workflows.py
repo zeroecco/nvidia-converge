@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 from nvidia_converge.desired import load_desired
@@ -548,6 +550,20 @@ def test_ci_exercises_each_supported_cpython_minor():
     assert "python -m build --no-isolation" in workflow
     assert "--isolated --no-index --no-deps --force-reinstall dist/*.whl" in workflow
     assert "--no-build-isolation" in workflow
+
+
+def test_stdlib_suite_runs_without_site_packages():
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "tests/run_tests.py"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "all tests passed\n"
+    assert result.stderr == ""
 
 
 def test_ci_and_release_gate_the_evidence_tooling():
