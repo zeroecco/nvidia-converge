@@ -270,7 +270,13 @@ def test_install_dry_run() -> None:
         if report["command_results"]:
             assert any(result.get("skipped") for result in report["command_results"])
         else:
-            assert [action["id"] for action in report["plan"]] == ["unsupported.package-manager"]
+            assert rc == 2
+            assert report["plan"]
+            assert all(
+                action["id"].startswith("unsupported.")
+                and not action["commands"]
+                for action in report["plan"]
+            )
 
 
 def test_install_dry_run_does_not_write_rollback() -> None:
