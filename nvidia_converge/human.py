@@ -51,7 +51,19 @@ def render_human(command: str, report: Report, *, apply: bool) -> str:
     lines.append("")
     if not apply and command in {"install", "lock", "rollback", "snapshot", "verify"}:
         lines.append("No host changes made. Re-run with --apply to execute mutating checks/actions.")
-    lines.append("Use --out report.json for the full machine-readable report, or --json to print it.")
+    if report.report_path:
+        lines.append(f"Report: {report.report_path}")
+        if apply:
+            lines.append(f"Journal: {report.report_path}.journal.jsonl")
+    if apply:
+        lines.append(
+            "Applied reports and command journals are retained under "
+            "/var/lib/nvidia-converge/reports."
+        )
+    else:
+        lines.append(
+            "Use --out report.json for the full machine-readable report, or --json to print it."
+        )
     return "\n".join(lines)
 
 

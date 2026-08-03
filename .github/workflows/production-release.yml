@@ -1,0 +1,1521 @@
+name: Production release
+
+on:
+  repository_dispatch:
+    types: [production-release]
+
+permissions: {}
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  repository-controls:
+    name: Verify repository controls before release gates
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.bind-release-source.outputs.release_tag }}
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Bind the dispatch to the live default-branch head
+        env:
+          DISPATCH_ACTION: ${{ github.event.action }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != repository_dispatch \
+            || "$DISPATCH_ACTION" != production-release \
+            || "$GITHUB_REF" != refs/heads/main \
+            || ! "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release dispatch is not bound to the main branch" >&2
+            exit 2
+          fi
+          repository_json="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}"
+          )"
+          live_default_branch="$(
+            jq -er '.default_branch | select(. == "main")' \
+              <<<"$repository_json"
+          )"
+          live_main_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/${live_default_branch}" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$live_main_sha" != "$GITHUB_SHA" ]]; then
+            echo "release dispatch is not the current live main head" >&2
+            exit 2
+          fi
+
+      - name: Check out repository-control checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up exact control-check Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Bind the release identity to trusted source
+        id: bind-release-source
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse --verify refs/remotes/origin/main)" = "$GITHUB_SHA"
+          release_version="$(
+            python -I -c \
+              'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])'
+          )"
+          release_tag="v${release_version}"
+          if [[ ! "$release_tag" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "package version cannot form a supported release tag" >&2
+            exit 2
+          fi
+          evidence_path="integrations/results.${release_tag}.json"
+          if [[ ! -f "$evidence_path" || -L "$evidence_path" ]]; then
+            echo "trusted main is missing tag-specific release evidence" >&2
+            exit 2
+          fi
+          git ls-files --error-unmatch -- "$evidence_path" >/dev/null
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse missing or ineffective production controls
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -I scripts/check_repository_controls.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --scope release
+
+  gates:
+    name: Run release gates
+    needs: repository-controls
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ needs.repository-controls.outputs.release_tag }}
+    env:
+      RELEASE_TAG: ${{ needs.repository-controls.outputs.release_tag }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Verify protected-main release provenance
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          git show-ref --verify --quiet refs/remotes/origin/main || {
+            echo "the release checkout does not contain origin/main" >&2
+            exit 2
+          }
+          if [[ "$(git rev-parse --verify refs/remotes/origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "the release source is not the exact fetched main head" >&2
+            exit 2
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "release identity was not forwarded intact" >&2
+            exit 2
+          fi
+
+      - name: Validate GitHub Actions workflows
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_ARCHIVE_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          tool_root="${RUNNER_TEMP}/nvidia-converge-actionlint"
+          mkdir "$tool_root"
+          archive="$tool_root/actionlint.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          (
+            cd "$tool_root"
+            printf '%s  %s\n' "$ACTIONLINT_ARCHIVE_SHA256" actionlint.tar.gz \
+              | sha256sum --check --strict -
+            tar --extract --file actionlint.tar.gz \
+              --no-same-owner --no-same-permissions actionlint
+          )
+          test -f "$tool_root/actionlint"
+          test ! -L "$tool_root/actionlint"
+          chmod 0500 "$tool_root/actionlint"
+          version_output="$("$tool_root/actionlint" -version)"
+          test "${version_output%%$'\n'*}" = "$ACTIONLINT_VERSION"
+          "$tool_root/actionlint" -color=false -shellcheck= -pyflakes=
+
+      - name: Install locked release tooling
+        run: |
+          python -m pip install \
+            --require-hashes --no-deps \
+            --requirement requirements/release.lock
+
+      - name: Run release gates
+        run: |
+          python -m compileall -q nvidia_converge scripts tests
+          python tests/run_tests.py
+          python -m ruff check .
+          python -m mypy \
+            nvidia_converge \
+            scripts/canonicalize_sdist.py \
+            scripts/check_repository_controls.py \
+            scripts/check_release_evidence.py \
+            scripts/export_integration_attestation.py \
+            scripts/bundle_release_evidence.py \
+            scripts/verify_release_evidence_bundle.py
+          python -m pytest -q
+
+      - name: Recheck immutable checkout after gates
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          git diff --quiet HEAD -- || {
+            echo "release gates modified tracked source" >&2
+            exit 2
+          }
+          untracked="$(git ls-files --others --exclude-standard)"
+          if [ -n "$untracked" ]; then
+            echo "release gates left non-ignored untracked source" >&2
+            printf '%s\n' "$untracked" >&2
+            exit 2
+          fi
+
+  artifacts:
+    name: Construct release artifacts
+    needs: gates
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ needs.gates.outputs.release_tag }}
+    env:
+      RELEASE_TAG: ${{ needs.gates.outputs.release_tag }}
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Check out repository on fresh artifact runner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up exact artifact Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Repeat protected-main release provenance
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          git show-ref --verify --quiet refs/remotes/origin/main || {
+            echo "the artifact checkout does not contain origin/main" >&2
+            exit 2
+          }
+          if [[ "$(git rev-parse --verify refs/remotes/origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "the artifact source is not the exact fetched main head" >&2
+            exit 2
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "release identity was not forwarded intact" >&2
+            exit 2
+          fi
+
+      - name: Install locked artifact tooling
+        run: |
+          python -m pip install \
+            --require-hashes --no-deps \
+            --requirement requirements/release.lock
+
+      - name: Prove clean immutable artifact checkout
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          git diff --quiet HEAD -- || {
+            echo "fresh artifact checkout has modified tracked source" >&2
+            exit 2
+          }
+          git diff --cached --quiet HEAD -- || {
+            echo "fresh artifact checkout has staged source changes" >&2
+            exit 2
+          }
+          untracked="$(git ls-files --others --exclude-standard)"
+          if [ -n "$untracked" ]; then
+            echo "fresh artifact checkout has non-ignored untracked source" >&2
+            printf '%s\n' "$untracked" >&2
+            exit 2
+          fi
+
+      - name: Build and bind release artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "unsupported release tag for artifact naming: $RELEASE_TAG" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence_path="integrations/results.${RELEASE_TAG}.json"
+          if [[ ! -f "$evidence_path" || -L "$evidence_path" ]]; then
+            echo "release evidence must be a regular nonsymlink file" >&2
+            exit 2
+          fi
+          tested_commit="$(
+            jq -er \
+              '.commit | select(type == "string" and length == 40 and test("^[0-9a-f]+$"))' \
+              "$evidence_path"
+          )" || {
+            echo "release evidence does not name a full lowercase tested commit" >&2
+            exit 2
+          }
+          if [[ ! "$tested_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release evidence tested commit is not a full lowercase SHA" >&2
+            exit 2
+          fi
+          git cat-file -e "${tested_commit}^{commit}" || {
+            echo "tested evidence commit is unavailable in release history" >&2
+            exit 2
+          }
+          git merge-base --is-ancestor "$tested_commit" "$GITHUB_SHA" || {
+            echo "tested evidence commit is not an ancestor of the release tag" >&2
+            exit 2
+          }
+          while IFS= read -r changed_path; do
+            if [[ -n "$changed_path" && "$changed_path" != "$evidence_path" ]]; then
+              echo "source changed after qualification: $changed_path" >&2
+              exit 2
+            fi
+          done < <(git diff --name-only "$tested_commit" "$GITHUB_SHA" --)
+
+          build_root="$(mktemp -d)"
+          trap 'rm -rf -- "$build_root"' EXIT
+          mkdir -p \
+            "$build_root/evidence-source" \
+            "$build_root/wheel-source-a" "$build_root/wheel-source-b" \
+            "$build_root/sdist-source-a" "$build_root/sdist-source-b" \
+            "$build_root/dist-a" "$build_root/dist-b"
+
+          export SOURCE_DATE_EPOCH
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$tested_commit")"
+          export PYTHONHASHSEED=0
+          export TZ=UTC
+          export LC_ALL=C.UTF-8
+
+          git archive --format=tar "$GITHUB_SHA" \
+            | tar -xf - -C "$build_root/evidence-source"
+          git archive --format=tar "$tested_commit" \
+            | tar -xf - -C "$build_root/wheel-source-a"
+          git archive --format=tar "$tested_commit" \
+            | tar -xf - -C "$build_root/wheel-source-b"
+          git archive --format=tar "$GITHUB_SHA" \
+            | tar -xf - -C "$build_root/sdist-source-a"
+          git archive --format=tar "$GITHUB_SHA" \
+            | tar -xf - -C "$build_root/sdist-source-b"
+          python -m build --wheel --no-isolation \
+            --outdir "$build_root/dist-a" "$build_root/wheel-source-a"
+          python -m build --wheel --no-isolation \
+            --outdir "$build_root/dist-b" "$build_root/wheel-source-b"
+          python -m build --sdist --no-isolation \
+            --outdir "$build_root/dist-a" "$build_root/sdist-source-a"
+          python -m build --sdist --no-isolation \
+            --outdir "$build_root/dist-b" "$build_root/sdist-source-b"
+          python "$build_root/sdist-source-a/scripts/canonicalize_sdist.py" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            "$build_root/dist-a/$sdist"
+          python "$build_root/sdist-source-b/scripts/canonicalize_sdist.py" \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            "$build_root/dist-b/$sdist"
+
+          validate_build_inventory() {
+            local directory="$1"
+            local actual_count name
+            actual_count="$(
+              find "$directory" -mindepth 1 -maxdepth 1 -printf . | wc -c
+            )"
+            if (( actual_count != 2 )); then
+              echo "release build did not produce exactly a wheel and source distribution" >&2
+              return 1
+            fi
+            for name in "$wheel" "$sdist"; do
+              if [[ ! -f "$directory/$name" || -L "$directory/$name" ]]; then
+                echo "release build output is missing or unsafe: $name" >&2
+                return 1
+              fi
+            done
+          }
+          validate_build_inventory "$build_root/dist-a"
+          validate_build_inventory "$build_root/dist-b"
+          for name in "$wheel" "$sdist"; do
+            cmp --silent -- \
+              "$build_root/dist-a/$name" "$build_root/dist-b/$name" || {
+              echo "independent clean-source builds differ: $name" >&2
+              exit 2
+            }
+          done
+
+          mkdir -p dist
+          install -m 0644 -- \
+            "$build_root/dist-a/$wheel" "dist/$wheel"
+          install -m 0644 -- \
+            "$build_root/dist-a/$sdist" "dist/$sdist"
+          (
+            cd "$build_root/evidence-source"
+            python -m scripts.bundle_release_evidence \
+              --evidence "$GITHUB_WORKSPACE/$evidence_path" \
+              --release "${RELEASE_TAG}" \
+              --commit "${GITHUB_SHA}" \
+              --repository "${GITHUB_REPOSITORY}" \
+              --qualification-wheel "$build_root/dist-a/$wheel" \
+              --output "${RUNNER_TEMP}/gpu-integration-evidence.zip"
+          )
+          cmp --silent -- "$build_root/dist-a/$wheel" "dist/$wheel" || {
+            echo "evidence binding modified the verified release wheel" >&2
+            exit 2
+          }
+          python -m twine check "dist/$wheel" "dist/$sdist"
+          if [[ ! -f "${RUNNER_TEMP}/gpu-integration-evidence.zip" \
+            || -L "${RUNNER_TEMP}/gpu-integration-evidence.zip" ]]; then
+            echo "evidence bundler did not produce a safe regular file" >&2
+            exit 2
+          fi
+          install -m 0644 \
+            "${RUNNER_TEMP}/gpu-integration-evidence.zip" \
+            "dist/gpu-integration-evidence-${RELEASE_TAG}.zip"
+
+      - name: Smoke test wheel
+        run: |
+          python -m pip install --isolated --no-index --no-deps \
+            --force-reinstall dist/*.whl
+          (
+            cd "$RUNNER_TEMP"
+            python -I -m nvidia_converge --version
+            python -I -m nvidia_converge validate \
+              --desired "$GITHUB_WORKSPACE/examples/compute-580-open.yaml"
+            python -I -m nvidia_converge schema desired | python -m json.tool >/dev/null
+            python -I -m nvidia_converge schema integration-results | python -m json.tool >/dev/null
+            python -I -m nvidia_converge schema report | python -m json.tool >/dev/null
+            python -I -m nvidia_converge schema validation | python -m json.tool >/dev/null
+          )
+
+      - name: Smoke test source distribution
+        run: |
+          set -Eeuo pipefail
+          sdist_path="$(
+            find dist -mindepth 1 -maxdepth 1 -type f -name '*.tar.gz' -print
+          )"
+          if [[ -z "$sdist_path" || "$sdist_path" == *$'\n'* ]]; then
+            echo "expected exactly one source distribution for smoke testing" >&2
+            exit 2
+          fi
+          sdist_extract="$(mktemp -d)"
+          trap 'rm -rf -- "$sdist_extract"' EXIT
+          python - "$sdist_path" "$sdist_extract" <<'PY'
+          from pathlib import Path, PurePosixPath
+          import subprocess
+          import sys
+          import tarfile
+
+          archive_path = Path(sys.argv[1])
+          extract_root = Path(sys.argv[2])
+          retained_prefixes = (
+              ".github/workflows/",
+              "docs/",
+              "examples/",
+              "integrations/",
+              "nvidia_converge/",
+              "requirements/",
+              "schemas/",
+              "scripts/",
+              "tests/",
+          )
+          retained_top_level = {
+              "LICENSE",
+              "MANIFEST.in",
+              "README.md",
+              "nvidia-converge",
+              "pyproject.toml",
+          }
+          tracked = {
+              PurePosixPath(item.decode("utf-8"))
+              for item in subprocess.check_output(
+                  ["git", "ls-files", "-z"]
+              ).split(b"\0")
+              if item
+          }
+          expected = {
+              path
+              for path in tracked
+              if path.as_posix() in retained_top_level
+              or path.as_posix().startswith(retained_prefixes)
+          }
+          with tarfile.open(archive_path, "r:gz") as archive:
+              members = archive.getmembers()
+              names = [PurePosixPath(member.name) for member in members]
+              if len(names) != len(set(names)):
+                  raise SystemExit("source distribution has duplicate members")
+              roots = {name.parts[0] for name in names if name.parts}
+              if len(roots) != 1:
+                  raise SystemExit("source distribution has no single root")
+              root = next(iter(roots))
+              retained = {
+                  PurePosixPath(*name.parts[1:])
+                  for name, member in zip(names, members, strict=True)
+                  if member.isfile() and len(name.parts) > 1
+              }
+              missing = sorted(expected - retained)
+              if missing:
+                  rendered = "\n".join(f"  {path}" for path in missing)
+                  raise SystemExit(
+                      "source distribution omits required source files:\n"
+                      + rendered
+                  )
+              archive.extractall(extract_root, filter="data")
+          PY
+          source_root="$(
+            find "$sdist_extract" -mindepth 1 -maxdepth 1 -type d -print
+          )"
+          if [[ -z "$source_root" || "$source_root" == *$'\n'* ]]; then
+            echo "source distribution did not extract to exactly one root" >&2
+            exit 2
+          fi
+          (
+            cd "$source_root"
+            python -m scripts.verify_release_evidence_bundle --help >/dev/null
+          )
+          python -m pip install --isolated --no-index --no-deps \
+            --no-build-isolation --force-reinstall dist/*.tar.gz
+          (
+            cd "$RUNNER_TEMP"
+            python -I -m nvidia_converge --version
+            python -I -m nvidia_converge schema validation \
+              | python -m json.tool >/dev/null
+          )
+
+      - name: Recheck immutable checkout before artifact handoff
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          git diff --quiet HEAD -- || {
+            echo "artifact construction modified tracked source" >&2
+            exit 2
+          }
+          untracked="$(git ls-files --others --exclude-standard)"
+          if [ -n "$untracked" ]; then
+            echo "artifact construction left non-ignored untracked source" >&2
+            printf '%s\n' "$untracked" >&2
+            exit 2
+          fi
+
+      - name: Generate checksums
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "unsupported release tag for artifact naming: $RELEASE_TAG" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+          if [[ "$release_version" != "$package_version" ]]; then
+            echo "release tag $RELEASE_TAG does not match package version $package_version" >&2
+            exit 2
+          fi
+
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence="gpu-integration-evidence-${RELEASE_TAG}.zip"
+          release_assets=("$evidence" "$wheel" "$sdist")
+          if ! printf '%s\n' "${release_assets[@]}" | LC_ALL=C sort --check; then
+            echo "internal error: expected release inventory is not sorted" >&2
+            exit 2
+          fi
+
+          validate_dist_inventory() {
+            local actual_count name
+
+            if [[ ! -d dist || -L dist ]]; then
+              echo "dist must be a real directory" >&2
+              return 1
+            fi
+            actual_count="$(
+              find dist -mindepth 1 -maxdepth 1 -printf . | wc -c
+            )"
+            if (( actual_count != $# )); then
+              echo "dist inventory is not the exact expected release inventory" >&2
+              printf 'expected: %q\n' "$@" >&2
+              return 1
+            fi
+            for name in "$@"; do
+              if [[ ! -f "dist/$name" || -L "dist/$name" ]]; then
+                echo "dist entry is not a direct regular nonsymlink file: $name" >&2
+                return 1
+              fi
+            done
+          }
+
+          validate_dist_inventory "${release_assets[@]}"
+          (
+            cd dist
+            sha256sum -- "${release_assets[@]}" > SHA256SUMS
+            sha256sum --check --strict -- SHA256SUMS
+          )
+          validate_dist_inventory "${release_assets[@]}" SHA256SUMS
+
+      - name: Retain built release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-dist-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Attest and publish release
+    needs: artifacts
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      RELEASE_TAG: ${{ needs.artifacts.outputs.release_tag }}
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Set up exact publication Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Download built release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-dist-${{ github.sha }}
+          path: dist
+
+      - name: Verify exact release handoff
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "unsupported release tag for artifact naming: $RELEASE_TAG" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence="gpu-integration-evidence-${RELEASE_TAG}.zip"
+          release_assets=("$evidence" "$wheel" "$sdist")
+          if ! printf '%s\n' "${release_assets[@]}" | LC_ALL=C sort --check; then
+            echo "internal error: expected release inventory is not sorted" >&2
+            exit 2
+          fi
+
+          validate_dist_inventory() {
+            local actual_count name
+
+            if [[ ! -d dist || -L dist ]]; then
+              echo "dist must be a real directory" >&2
+              return 1
+            fi
+            actual_count="$(
+              find dist -mindepth 1 -maxdepth 1 -printf . | wc -c
+            )"
+            if (( actual_count != $# )); then
+              echo "dist inventory is not the exact expected release inventory" >&2
+              printf 'expected: %q\n' "$@" >&2
+              return 1
+            fi
+            for name in "$@"; do
+              if [[ ! -f "dist/$name" || -L "dist/$name" ]]; then
+                echo "dist entry is not a direct regular nonsymlink file: $name" >&2
+                return 1
+              fi
+            done
+          }
+
+          validate_dist_inventory "${release_assets[@]}" SHA256SUMS
+          expected_checksums="$(mktemp)"
+          trap 'rm -f -- "$expected_checksums"' EXIT
+          (
+            cd dist
+            sha256sum -- "${release_assets[@]}"
+          ) > "$expected_checksums"
+          if ! cmp --silent -- "$expected_checksums" dist/SHA256SUMS; then
+            echo "SHA256SUMS is not the exact checksum manifest for the expected release inventory" >&2
+            exit 2
+          fi
+          (
+            cd dist
+            sha256sum --check --strict -- SHA256SUMS
+          )
+          python -m zipfile --test "dist/$wheel"
+
+      - name: Recheck current main, release controls, and immutable configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.REPOSITORY_AUDIT_TOKEN }}
+          RELEASE_CREATOR_APP_ID: ${{ vars.RELEASE_CREATOR_APP_ID }}
+        run: |
+          set -Eeuo pipefail
+          live_main_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/main" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$GITHUB_REF" != refs/heads/main \
+            || "$live_main_sha" != "$GITHUB_SHA" ]]; then
+            echo "release source is no longer the exact live main head" >&2
+            exit 2
+          fi
+          if [[ ! "$RELEASE_CREATOR_APP_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "RELEASE_CREATOR_APP_ID must be a positive integer" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          wheel="$(pwd)/dist/nvidia_converge-${release_version}-py3-none-any.whl"
+          if [[ ! -f "$wheel" || -L "$wheel" ]]; then
+            echo "release control checker wheel is missing or unsafe" >&2
+            exit 2
+          fi
+          python -I - \
+            "$wheel" "$GITHUB_REPOSITORY" "$RELEASE_CREATOR_APP_ID" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'PY'
+          import runpy
+          import sys
+
+          wheel, repository, app_id, run_id, run_attempt = sys.argv[1:]
+          sys.path.insert(0, wheel)
+          sys.argv = [
+              "repository-controls",
+              "--repository",
+              repository,
+              "--scope",
+              "release",
+              "--require-immutable-releases",
+              "--release-creator-app-id",
+              app_id,
+              "--require-release-writer-isolation",
+              "--release-workflow-run-id",
+              run_id,
+              "--release-workflow-run-attempt",
+              run_attempt,
+          ]
+          runpy.run_module(
+              "nvidia_converge.repository_controls", run_name="__main__"
+          )
+          PY
+
+      - name: Mint a short-lived Release Creator token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ vars.RELEASE_CREATOR_APP_ID }}
+          private-key: ${{ secrets.RELEASE_CREATOR_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Prove Release Creator token has exact repository scope
+        env:
+          EXPECTED_APP_ID: ${{ vars.RELEASE_CREATOR_APP_ID }}
+          EXPECTED_APP_SLUG: ${{ steps.release-token.outputs.app-slug }}
+          EXPECTED_INSTALLATION_ID: ${{ steps.release-token.outputs.installation-id }}
+          EXPECTED_REPOSITORY_ID: ${{ github.event.repository.id }}
+          EXPECTED_REPOSITORY_NAME: ${{ github.event.repository.name }}
+          EXPECTED_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+        run: |
+          set -Eeuo pipefail
+          if [[ ! "$EXPECTED_APP_ID" =~ ^[1-9][0-9]*$ \
+            || ! "$EXPECTED_APP_SLUG" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,99}$ \
+            || ! "$EXPECTED_INSTALLATION_ID" =~ ^[1-9][0-9]*$ \
+            || ! "$EXPECTED_REPOSITORY_ID" =~ ^[1-9][0-9]*$ \
+            || ! "$EXPECTED_REPOSITORY_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ \
+            || ! "$EXPECTED_REPOSITORY_OWNER" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,99}$ \
+            || "$GITHUB_REPOSITORY" \
+              != "${EXPECTED_REPOSITORY_OWNER}/${EXPECTED_REPOSITORY_NAME}" ]]; then
+            echo "Release Creator token context is malformed" >&2
+            exit 2
+          fi
+          repositories_response="$(mktemp)"
+          trap 'rm -f -- "$repositories_response"' EXIT
+          status="$(
+            curl --silent --show-error \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --connect-timeout 10 --max-time 60 \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "User-Agent: nvidia-converge-production-release" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --output "$repositories_response" --write-out '%{http_code}' \
+              "https://api.github.com/installation/repositories?per_page=100&page=1"
+          )"
+          if [[ "$status" != 200 \
+            || "$(stat -c '%s' -- "$repositories_response")" -gt 2097152 ]] \
+            || ! jq -e \
+              --argjson repository_id "$EXPECTED_REPOSITORY_ID" \
+              --arg repository "$GITHUB_REPOSITORY" \
+              --arg repository_name "$EXPECTED_REPOSITORY_NAME" \
+              --arg repository_owner "$EXPECTED_REPOSITORY_OWNER" \
+              'type == "object"
+               and .total_count == 1
+               and (.repositories | type == "array" and length == 1)
+               and .repositories[0].id == $repository_id
+               and .repositories[0].full_name == $repository
+               and .repositories[0].name == $repository_name
+               and .repositories[0].owner.login == $repository_owner
+               and .repositories[0].archived == false
+               and .repositories[0].disabled == false' \
+              "$repositories_response" >/dev/null
+          then
+            echo "Release Creator token is not scoped to exactly this repository" >&2
+            exit 2
+          fi
+
+      - name: Create and bind the exact release tag
+        id: bind-release-tag
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+        run: |
+          set -Eeuo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9][0-9A-Za-z.]*$ ]]; then
+            echo "unsupported release tag: $RELEASE_TAG" >&2
+            exit 2
+          fi
+          tag_payload="$(
+            jq -nc \
+              --arg ref "refs/tags/${RELEASE_TAG}" \
+              --arg sha "$GITHUB_SHA" \
+              '{ref: $ref, sha: $sha}'
+          )"
+          tag_response="$(mktemp)"
+          trap 'rm -f -- "$tag_response"' EXIT
+          tag_status="$(
+            curl --silent --show-error \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --connect-timeout 10 --max-time 60 \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/json" \
+              --header "User-Agent: nvidia-converge-production-release" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --data-binary "$tag_payload" \
+              --output "$tag_response" --write-out '%{http_code}' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs"
+          )"
+          if [[ "$tag_status" != 201 \
+            || "$(stat -c '%s' -- "$tag_response")" -gt 1048576 ]]; then
+            echo "GitHub did not create a fresh bounded release tag response" >&2
+            exit 2
+          fi
+          jq -e \
+            --arg ref "refs/tags/${RELEASE_TAG}" \
+            --arg sha "$GITHUB_SHA" \
+            '.ref == $ref and .object.type == "commit" and .object.sha == $sha' \
+            "$tag_response" >/dev/null || {
+            echo "created release tag is not bound to the gated commit" >&2
+            exit 2
+          }
+          resolved_commit="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/tags/${RELEASE_TAG}" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$resolved_commit" != "$GITHUB_SHA" ]]; then
+            echo "created release tag does not resolve to the gated commit" >&2
+            exit 2
+          fi
+          echo "tag_ref_object_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: "dist/*"
+
+      - name: Recheck controls and tag immediately before draft creation
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.REPOSITORY_AUDIT_TOKEN }}
+          RELEASE_CREATOR_APP_ID: ${{ vars.RELEASE_CREATOR_APP_ID }}
+          EXPECTED_TAG_REF_OBJECT_SHA: ${{ steps.bind-release-tag.outputs.tag_ref_object_sha }}
+        run: |
+          set -Eeuo pipefail
+          release_version="${RELEASE_TAG#v}"
+          wheel="$(pwd)/dist/nvidia_converge-${release_version}-py3-none-any.whl"
+          python -I - \
+            "$wheel" "$GITHUB_REPOSITORY" "$RELEASE_CREATOR_APP_ID" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'PY'
+          import runpy
+          import sys
+
+          wheel, repository, app_id, run_id, run_attempt = sys.argv[1:]
+          sys.path.insert(0, wheel)
+          sys.argv = [
+              "repository-controls",
+              "--repository",
+              repository,
+              "--scope",
+              "release",
+              "--require-immutable-releases",
+              "--release-creator-app-id",
+              app_id,
+              "--require-release-writer-isolation",
+              "--release-workflow-run-id",
+              run_id,
+              "--release-workflow-run-attempt",
+              run_attempt,
+          ]
+          runpy.run_module(
+              "nvidia_converge.repository_controls", run_name="__main__"
+          )
+          PY
+          live_main_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/main" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          current_ref_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+              --jq '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          current_commit_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/tags/${RELEASE_TAG}" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$live_main_sha" != "$GITHUB_SHA" \
+            || "$current_ref_sha" != "$EXPECTED_TAG_REF_OBJECT_SHA" \
+            || "$current_commit_sha" != "$GITHUB_SHA" ]]; then
+            echo "release source or tag changed before draft creation" >&2
+            exit 2
+          fi
+
+      - name: Create draft GitHub release
+        id: create-draft
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+        run: |
+          set -Eeuo pipefail
+          release_version="${RELEASE_TAG#v}"
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence="gpu-integration-evidence-${RELEASE_TAG}.zip"
+          release_assets=(SHA256SUMS "$evidence" "$wheel" "$sdist")
+          release_body_path="${RUNNER_TEMP}/nvidia-converge-release-body"
+          if [[ -e "$release_body_path" || -L "$release_body_path" ]]; then
+            echo "release-body staging path already exists" >&2
+            exit 2
+          fi
+          umask 077
+          release_payload="$(
+            jq -nc \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$GITHUB_SHA" \
+              '{
+                tag_name: $tag,
+                target_commitish: $target,
+                name: $tag,
+                draft: true,
+                prerelease: false,
+                generate_release_notes: true,
+                make_latest: "false"
+              }'
+          )"
+          response="$(mktemp)"
+          trap 'rm -f -- "$response"' EXIT
+          status="$(
+            curl --silent --show-error \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --connect-timeout 10 --max-time 60 \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/json" \
+              --header "User-Agent: nvidia-converge-production-release" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --data-binary "$release_payload" \
+              --output "$response" --write-out '%{http_code}' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases"
+          )"
+          if [[ "$status" != 201 \
+            || "$(stat -c '%s' -- "$response")" -gt 1048576 ]]; then
+            echo "GitHub did not create a fresh bounded draft release response" >&2
+            exit 2
+          fi
+          release_id="$(
+            jq -er \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$GITHUB_SHA" \
+              'select(
+                (.id | type == "number" and . > 0)
+                and .tag_name == $tag
+                and .target_commitish == $target
+                and .name == $tag
+                and (.body | type == "string")
+                and .draft == true
+                and .prerelease == false
+                and .immutable == false
+                and .assets == []
+              ) | .id' \
+              "$response"
+          )" || {
+            echo "created draft release is not exactly bound to this run" >&2
+            exit 2
+          }
+          jq -j \
+            'if (.body | type) == "string" then .body else error("invalid release body") end' \
+            "$response" > "$release_body_path"
+          chmod 0600 "$release_body_path"
+          release_body_sha256="$(
+            sha256sum -- "$release_body_path" | cut -d ' ' -f 1
+          )"
+          if [[ ! "$release_body_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "created draft release body has no canonical digest" >&2
+            exit 2
+          fi
+          for name in "${release_assets[@]}"; do
+            if [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ \
+              || ! -f "dist/$name" || -L "dist/$name" ]]; then
+              echo "unsafe release asset before upload: $name" >&2
+              exit 2
+            fi
+            status="$(
+              curl --silent --show-error \
+                --proto '=https' --tlsv1.2 --max-redirs 0 \
+                --connect-timeout 10 --max-time 300 \
+                --request POST \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer $GH_TOKEN" \
+                --header "Content-Type: application/octet-stream" \
+                --header "User-Agent: nvidia-converge-production-release" \
+                --header "X-GitHub-Api-Version: 2026-03-10" \
+                --data-binary "@dist/$name" \
+                --output "$response" --write-out '%{http_code}' \
+                "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${name}"
+            )"
+            expected_size="$(stat -c '%s' -- "dist/$name")"
+            expected_digest="sha256:$(sha256sum -- "dist/$name" | cut -d ' ' -f 1)"
+            if [[ "$status" != 201 \
+              || "$(stat -c '%s' -- "$response")" -gt 1048576 ]] \
+              || ! jq -e \
+                --arg name "$name" \
+                --arg digest "$expected_digest" \
+                --argjson size "$expected_size" \
+                '.name == $name
+                 and .state == "uploaded"
+                 and .size == $size
+                 and .digest == $digest
+                 and (.id | type == "number" and . > 0)' \
+                "$response" >/dev/null
+            then
+              echo "GitHub did not retain the exact uploaded asset: $name" >&2
+              exit 2
+            fi
+          done
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "release_body_sha256=$release_body_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Verify draft release inventory
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          EXPECTED_RELEASE_BODY_SHA256: ${{ steps.create-draft.outputs.release_body_sha256 }}
+          RELEASE_ID: ${{ steps.create-draft.outputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          release_body_path="${RUNNER_TEMP}/nvidia-converge-release-body"
+          if [[ ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
+            || ! "$EXPECTED_RELEASE_BODY_SHA256" =~ ^[0-9a-f]{64}$ \
+            || ! -f "$release_body_path" || -L "$release_body_path" \
+            || "$(sha256sum -- "$release_body_path" | cut -d ' ' -f 1)" \
+              != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "draft release identity or canonical body is invalid" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence="gpu-integration-evidence-${RELEASE_TAG}.zip"
+          release_assets=(SHA256SUMS "$evidence" "$wheel" "$sdist")
+          draft_json="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+          )"
+          if ! jq -e \
+            --argjson release_id "$RELEASE_ID" \
+            --arg tag "$RELEASE_TAG" \
+            --arg target "$GITHUB_SHA" \
+            --arg checksum SHA256SUMS \
+            --arg evidence "$evidence" \
+            --arg wheel "$wheel" \
+            --arg sdist "$sdist" \
+            '
+              .id == $release_id
+              and .draft == true
+              and .prerelease == false
+              and .immutable == false
+              and .tag_name == $tag
+              and .target_commitish == $target
+              and .name == $tag
+              and (.body | type == "string")
+              and (.assets | length == 4)
+              and all(
+                .assets[];
+                .state == "uploaded"
+                and .size > 0
+                and (.id | type == "number")
+                and (.digest | type == "string")
+                and (.digest | test("^sha256:[0-9a-f]{64}$"))
+              )
+              and (
+                [.assets[].name] | sort
+              ) == (
+                [$checksum, $evidence, $wheel, $sdist] | sort
+              )
+            ' <<<"$draft_json" >/dev/null
+          then
+            echo "draft release is not the exact complete release inventory" >&2
+            exit 2
+          fi
+          observed_release_body_sha256="$(
+            jq -j \
+              'if (.body | type) == "string" then .body else error("invalid release body") end' \
+              <<<"$draft_json" | sha256sum | cut -d ' ' -f 1
+          )"
+          if [[ "$observed_release_body_sha256" \
+            != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "draft release body changed after creation" >&2
+            exit 2
+          fi
+
+          remote_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$remote_dir"' EXIT
+          for name in "${release_assets[@]}"; do
+            asset_id="$(
+              jq -er --arg name "$name" \
+                '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("non-unique release asset") end' \
+                <<<"$draft_json"
+            )"
+            expected_digest="sha256:$(sha256sum -- "dist/$name" | cut -d ' ' -f 1)"
+            expected_size="$(stat -c '%s' -- "dist/$name")"
+            if ! jq -e \
+              --arg name "$name" \
+              --arg digest "$expected_digest" \
+              --argjson size "$expected_size" \
+              'any(.assets[]; .name == $name and .digest == $digest and .size == $size)' \
+              <<<"$draft_json" >/dev/null
+            then
+              echo "remote release asset metadata does not match local bytes: $name" >&2
+              exit 2
+            fi
+            gh api \
+              -H "Accept: application/octet-stream" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "$remote_dir/$name"
+            if ! cmp --silent -- "dist/$name" "$remote_dir/$name"; then
+              echo "downloaded draft release asset does not match local bytes: $name" >&2
+              exit 2
+            fi
+          done
+          (
+            cd "$remote_dir"
+            sha256sum --check --strict -- SHA256SUMS
+          )
+
+      - name: Recheck controls immediately before publication
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          GITHUB_TOKEN: ${{ secrets.REPOSITORY_AUDIT_TOKEN }}
+          RELEASE_CREATOR_APP_ID: ${{ vars.RELEASE_CREATOR_APP_ID }}
+          EXPECTED_TAG_REF_OBJECT_SHA: ${{ steps.bind-release-tag.outputs.tag_ref_object_sha }}
+        run: |
+          set -Eeuo pipefail
+          release_version="${RELEASE_TAG#v}"
+          wheel="$(pwd)/dist/nvidia_converge-${release_version}-py3-none-any.whl"
+          python -I - \
+            "$wheel" "$GITHUB_REPOSITORY" "$RELEASE_CREATOR_APP_ID" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" <<'PY'
+          import runpy
+          import sys
+
+          wheel, repository, app_id, run_id, run_attempt = sys.argv[1:]
+          sys.path.insert(0, wheel)
+          sys.argv = [
+              "repository-controls",
+              "--repository",
+              repository,
+              "--scope",
+              "release",
+              "--require-immutable-releases",
+              "--release-creator-app-id",
+              app_id,
+              "--require-release-writer-isolation",
+              "--release-workflow-run-id",
+              run_id,
+              "--release-workflow-run-attempt",
+              run_attempt,
+          ]
+          runpy.run_module(
+              "nvidia_converge.repository_controls", run_name="__main__"
+          )
+          PY
+          live_main_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/main" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          current_ref_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+              --jq '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          current_commit_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/tags/${RELEASE_TAG}" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$live_main_sha" != "$GITHUB_SHA" \
+            || "$current_ref_sha" != "$EXPECTED_TAG_REF_OBJECT_SHA" \
+            || "$current_commit_sha" != "$GITHUB_SHA" ]]; then
+            echo "release source or tag changed before immutable publication" >&2
+            exit 2
+          fi
+
+      - name: Reverify the bound draft immediately before publication
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          EXPECTED_RELEASE_BODY_SHA256: ${{ steps.create-draft.outputs.release_body_sha256 }}
+          RELEASE_ID: ${{ steps.create-draft.outputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          release_body_path="${RUNNER_TEMP}/nvidia-converge-release-body"
+          if [[ ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
+            || ! "$EXPECTED_RELEASE_BODY_SHA256" =~ ^[0-9a-f]{64}$ \
+            || ! -f "$release_body_path" || -L "$release_body_path" \
+            || "$(sha256sum -- "$release_body_path" | cut -d ' ' -f 1)" \
+              != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "bound draft identity or canonical body is invalid" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence="gpu-integration-evidence-${RELEASE_TAG}.zip"
+          release_assets=(SHA256SUMS "$evidence" "$wheel" "$sdist")
+          release_json="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+          )"
+          if ! jq -e \
+            --argjson release_id "$RELEASE_ID" \
+            --arg tag "$RELEASE_TAG" \
+            --arg target "$GITHUB_SHA" \
+            --arg checksum SHA256SUMS \
+            --arg evidence "$evidence" \
+            --arg wheel "$wheel" \
+            --arg sdist "$sdist" \
+            '.id == $release_id
+             and .tag_name == $tag
+             and .target_commitish == $target
+             and .name == $tag
+             and .draft == true
+             and .prerelease == false
+             and .immutable == false
+             and (.body | type == "string")
+             and (.assets | length == 4)
+             and ([.assets[].name] | sort)
+               == ([$checksum, $evidence, $wheel, $sdist] | sort)
+             and all(
+               .assets[];
+               .state == "uploaded"
+               and .size > 0
+               and (.id | type == "number" and . > 0)
+               and (.digest | type == "string")
+               and (.digest | test("^sha256:[0-9a-f]{64}$"))
+             )' <<<"$release_json" >/dev/null
+          then
+            echo "bound draft changed before publication" >&2
+            exit 2
+          fi
+          observed_release_body_sha256="$(
+            jq -j \
+              'if (.body | type) == "string" then .body else error("invalid release body") end' \
+              <<<"$release_json" | sha256sum | cut -d ' ' -f 1
+          )"
+          if [[ "$observed_release_body_sha256" \
+            != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "bound draft body changed before publication" >&2
+            exit 2
+          fi
+          remote_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$remote_dir"' EXIT
+          for name in "${release_assets[@]}"; do
+            asset_id="$(
+              jq -er --arg name "$name" \
+                '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("non-unique release asset") end' \
+                <<<"$release_json"
+            )"
+            expected_digest="sha256:$(sha256sum -- "dist/$name" | cut -d ' ' -f 1)"
+            expected_size="$(stat -c '%s' -- "dist/$name")"
+            jq -e \
+              --arg name "$name" \
+              --arg digest "$expected_digest" \
+              --argjson size "$expected_size" \
+              'any(.assets[]; .name == $name and .digest == $digest and .size == $size)' \
+              <<<"$release_json" >/dev/null || {
+              echo "draft asset metadata changed before publication: $name" >&2
+              exit 2
+            }
+            gh api \
+              -H "Accept: application/octet-stream" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "$remote_dir/$name"
+            cmp --silent -- "dist/$name" "$remote_dir/$name" || {
+              echo "draft asset bytes changed before publication: $name" >&2
+              exit 2
+            }
+          done
+          (
+            cd "$remote_dir"
+            sha256sum --check --strict -- SHA256SUMS
+          )
+
+      - name: Publish the bound release ID
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          EXPECTED_RELEASE_BODY_SHA256: ${{ steps.create-draft.outputs.release_body_sha256 }}
+          RELEASE_ID: ${{ steps.create-draft.outputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          release_body_path="${RUNNER_TEMP}/nvidia-converge-release-body"
+          if [[ ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ \
+            || ! "$EXPECTED_RELEASE_BODY_SHA256" =~ ^[0-9a-f]{64}$ \
+            || ! -f "$release_body_path" || -L "$release_body_path" \
+            || "$(sha256sum -- "$release_body_path" | cut -d ' ' -f 1)" \
+              != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "release publication identity or canonical body is invalid" >&2
+            exit 2
+          fi
+          release_payload="$(
+            jq -nc \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$GITHUB_SHA" \
+              --rawfile body "$release_body_path" \
+              '{
+                tag_name: $tag,
+                target_commitish: $target,
+                name: $tag,
+                body: $body,
+                draft: false,
+                prerelease: false,
+                make_latest: "false"
+              }'
+          )"
+          response="$(mktemp)"
+          trap 'rm -f -- "$response"' EXIT
+          status="$(
+            curl --silent --show-error \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --connect-timeout 10 --max-time 60 \
+              --request PATCH \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Content-Type: application/json" \
+              --header "User-Agent: nvidia-converge-production-release" \
+              --header "X-GitHub-Api-Version: 2026-03-10" \
+              --data-binary "$release_payload" \
+              --output "$response" --write-out '%{http_code}' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+          )"
+          if [[ "$status" != 200 \
+            || "$(stat -c '%s' -- "$response")" -gt 1048576 ]] \
+            || ! jq -e \
+              --argjson release_id "$RELEASE_ID" \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$GITHUB_SHA" \
+              '.id == $release_id
+               and .tag_name == $tag
+               and .target_commitish == $target
+               and .name == $tag
+               and (.body | type == "string")
+               and .draft == false
+               and .prerelease == false' \
+              "$response" >/dev/null
+          then
+            echo "GitHub did not publish the exact bound release ID" >&2
+            exit 2
+          fi
+          published_release_body_sha256="$(
+            jq -j \
+              'if (.body | type) == "string" then .body else error("invalid release body") end' \
+              "$response" | sha256sum | cut -d ' ' -f 1
+          )"
+          if [[ "$published_release_body_sha256" \
+            != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "GitHub published a release with a changed body" >&2
+            exit 2
+          fi
+
+      - name: Verify published release is immutable
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          EXPECTED_RELEASE_BODY_SHA256: ${{ steps.create-draft.outputs.release_body_sha256 }}
+          EXPECTED_TAG_REF_OBJECT_SHA: ${{ steps.bind-release-tag.outputs.tag_ref_object_sha }}
+          RELEASE_ID: ${{ steps.create-draft.outputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          if [[ ! "$EXPECTED_RELEASE_BODY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "immutable release body digest is invalid" >&2
+            exit 2
+          fi
+          release_version="${RELEASE_TAG#v}"
+          wheel="nvidia_converge-${release_version}-py3-none-any.whl"
+          sdist="nvidia_converge-${release_version}.tar.gz"
+          evidence="gpu-integration-evidence-${RELEASE_TAG}.zip"
+          release_assets=(SHA256SUMS "$evidence" "$wheel" "$sdist")
+          release_json="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+          )"
+          if ! jq -e \
+            --argjson release_id "$RELEASE_ID" \
+            --arg tag "$RELEASE_TAG" \
+            --arg target "$GITHUB_SHA" \
+            --arg checksum SHA256SUMS \
+            --arg evidence "$evidence" \
+            --arg wheel "$wheel" \
+            --arg sdist "$sdist" \
+            '.id == $release_id
+             and .tag_name == $tag
+             and .target_commitish == $target
+             and .name == $tag
+             and .draft == false
+             and .prerelease == false
+             and .immutable == true
+             and (.body | type == "string")
+             and (.assets | length == 4)
+             and ([.assets[].name] | sort)
+               == ([$checksum, $evidence, $wheel, $sdist] | sort)' \
+            <<<"$release_json" >/dev/null
+          then
+            echo "published release is not the exact immutable release" >&2
+            exit 2
+          fi
+          immutable_release_body_sha256="$(
+            jq -j \
+              'if (.body | type) == "string" then .body else error("invalid release body") end' \
+              <<<"$release_json" | sha256sum | cut -d ' ' -f 1
+          )"
+          if [[ "$immutable_release_body_sha256" \
+            != "$EXPECTED_RELEASE_BODY_SHA256" ]]; then
+            echo "immutable release body differs from the bound draft" >&2
+            exit 2
+          fi
+          final_ref_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" \
+              --jq '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          final_commit_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/tags/${RELEASE_TAG}" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$final_ref_sha" != "$EXPECTED_TAG_REF_OBJECT_SHA" \
+            || "$final_commit_sha" != "$GITHUB_SHA" ]]; then
+            echo "immutable release tag is not the exact gated tag object" >&2
+            exit 2
+          fi
+          remote_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$remote_dir"' EXIT
+          for name in "${release_assets[@]}"; do
+            asset_id="$(
+              jq -er --arg name "$name" \
+                '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("non-unique immutable release asset") end' \
+                <<<"$release_json"
+            )"
+            expected_digest="sha256:$(sha256sum -- "dist/$name" | cut -d ' ' -f 1)"
+            expected_size="$(stat -c '%s' -- "dist/$name")"
+            jq -e \
+              --arg name "$name" \
+              --arg digest "$expected_digest" \
+              --argjson size "$expected_size" \
+              'any(.assets[]; .name == $name and .digest == $digest and .size == $size)' \
+              <<<"$release_json" >/dev/null || {
+              echo "immutable asset metadata differs from local bytes: $name" >&2
+              exit 2
+            }
+            gh api \
+              -H "Accept: application/octet-stream" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "$remote_dir/$name"
+            cmp --silent -- "dist/$name" "$remote_dir/$name" || {
+              echo "immutable asset bytes differ from local bytes: $name" >&2
+              exit 2
+            }
+          done
+          (
+            cd "$remote_dir"
+            sha256sum --check --strict -- SHA256SUMS
+          )

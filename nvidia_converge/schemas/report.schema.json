@@ -4,11 +4,11 @@
   "title": "nvidia-converge report",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "generated_at", "desired", "audit", "findings", "plan", "command_results", "verification", "rollback", "sbom"],
+  "required": ["schema_version", "generated_at", "desired", "audit", "findings", "plan", "command_results", "verification", "rollback", "sbom", "command", "mode", "tool_version", "operation_id", "host_id", "started_at", "completed_at", "duration_seconds", "outcome", "exit_code", "reboot_required", "incomplete", "report_path"],
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.0"
+      "const": "1.2"
     },
     "generated_at": {
       "type": "string",
@@ -48,23 +48,42 @@
     "sbom": {
       "type": "array",
       "items": {"$ref": "#/$defs/package"}
-    }
+    },
+    "command": {"type": "string", "enum": ["doctor", "plan", "install", "verify", "lock", "snapshot", "rollback"]},
+    "mode": {"type": "string", "enum": ["dry-run", "apply"]},
+    "tool_version": {"type": "string", "minLength": 1},
+    "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "host_id": {"type": ["string", "null"]},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": "string", "format": "date-time"},
+    "duration_seconds": {"type": ["number", "null"], "minimum": 0},
+    "outcome": {"type": "string", "enum": ["succeeded", "failed"]},
+    "exit_code": {"type": "integer", "minimum": 0, "maximum": 255},
+    "reboot_required": {"type": ["boolean", "null"]},
+    "incomplete": {"type": "boolean"},
+    "report_path": {"type": ["string", "null"]}
   },
   "$defs": {
     "desired": {
       "type": "object",
-      "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "fabric_manager", "mig", "kernel_policy"],
+      "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "container_test_image", "fabric_manager", "mig", "mig_profile", "kernel_policy"],
       "additionalProperties": false,
       "properties": {
         "role": {"type": "string", "enum": ["compute"]},
         "driver": {"type": "string", "pattern": "^\\d+(?:-open|\\.\\d+(?:\\.\\d+)?)?$"},
-        "cuda_compat": {"type": "string", "pattern": "^\\d+\\.\\d+$"},
-        "secure_boot": {"type": "string", "enum": ["signed", "unsigned", "disabled"]},
+        "cuda_compat": {"type": "string", "enum": ["none"]},
+        "secure_boot": {"type": "string", "enum": ["signed", "disabled"]},
         "container_runtime": {"type": "string", "enum": ["docker"]},
+        "container_test_image": {"type": "string", "maxLength": 212, "pattern": "^nvidia/cuda:\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9._]+)*-devel(?:-[A-Za-z0-9._]+)*@sha256:[a-f0-9]{64}$"},
         "fabric_manager": {"type": "boolean"},
         "mig": {"type": "string", "enum": ["disabled", "enabled"]},
+        "mig_profile": {"type": "string", "enum": ["none", "full"]},
         "kernel_policy": {"type": "string", "enum": ["pin-compatible"]}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"mig": {"const": "enabled"}}}, "then": {"properties": {"mig_profile": {"const": "full"}}}},
+        {"if": {"properties": {"mig": {"const": "disabled"}}}, "then": {"properties": {"mig_profile": {"const": "none"}}}}
+      ]
     },
     "command_result": {
       "type": "object",
@@ -94,13 +113,39 @@
     },
     "package": {
       "type": "object",
-      "required": ["name", "version", "manager", "installed"],
+      "required": ["name", "version", "manager", "installed", "architecture", "epoch"],
       "additionalProperties": false,
       "properties": {
         "name": {"type": "string"},
         "version": {"type": ["string", "null"]},
         "manager": {"type": ["string", "null"]},
-        "installed": {"type": "boolean"}
+        "installed": {"type": "boolean"},
+        "architecture": {"type": ["string", "null"]},
+        "epoch": {"type": ["string", "null"]}
+      }
+    },
+    "package_policy_selector": {
+      "type": "object",
+      "required": ["identifier", "name", "kind", "relation", "version", "repositories"],
+      "additionalProperties": false,
+      "properties": {
+        "identifier": {"type": "string"},
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "relation": {"type": ["string", "null"]},
+        "version": {"type": ["string", "null"]},
+        "repositories": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "package_policy": {
+      "type": "object",
+      "required": ["backend", "observable", "selectors", "observation"],
+      "additionalProperties": false,
+      "properties": {
+        "backend": {"type": ["string", "null"], "enum": ["apt-get", "dnf", "yum", "zypper", null]},
+        "observable": {"type": "boolean"},
+        "selectors": {"type": "array", "items": {"$ref": "#/$defs/package_policy_selector"}},
+        "observation": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/command_result"}]}
       }
     },
     "kernel": {
@@ -116,13 +161,16 @@
     },
     "module": {
       "type": "object",
-      "required": ["loaded", "version", "open_module", "signed", "devices"],
+      "required": ["loaded", "version", "installed_version", "open_module", "installed_open_module", "signed", "installed_signed", "devices"],
       "additionalProperties": false,
       "properties": {
         "loaded": {"type": "boolean"},
         "version": {"type": ["string", "null"]},
+        "installed_version": {"type": ["string", "null"]},
         "open_module": {"type": ["boolean", "null"]},
+        "installed_open_module": {"type": ["boolean", "null"]},
         "signed": {"type": ["boolean", "null"]},
+        "installed_signed": {"type": ["boolean", "null"]},
         "devices": {"type": "array", "items": {"type": "string"}}
       }
     },
@@ -136,9 +184,44 @@
         "docker_gpus_usable": {"type": ["boolean", "null"]}
       }
     },
+    "cuda_compatibility": {
+      "type": "object",
+      "required": ["version", "package_name", "package_version", "library_path", "library_present", "library_probe"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "string", "pattern": "^\\d+\\.\\d+$"},
+        "package_name": {"type": "string", "pattern": "^cuda-compat-\\d+-\\d+$"},
+        "package_version": {"type": ["string", "null"]},
+        "library_path": {"type": "string", "pattern": "^/usr/local/cuda-\\d+\\.\\d+/compat/libcuda\\.so\\.1$"},
+        "library_present": {"type": "boolean"},
+        "library_probe": {"$ref": "#/$defs/command_result"}
+      }
+    },
+    "mig_compute_instance": {
+      "type": "object",
+      "required": ["profile", "profile_id"],
+      "additionalProperties": false,
+      "properties": {
+        "profile": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "profile_id": {"type": "integer", "minimum": 0}
+      }
+    },
+    "mig_gpu_instance": {
+      "type": "object",
+      "required": ["gpu_uuid", "profile", "profile_id", "placement_start", "placement_size", "compute_instances"],
+      "additionalProperties": false,
+      "properties": {
+        "gpu_uuid": {"type": "string", "pattern": "^(?:GPU-[A-Fa-f0-9-]{16,}|attested:[a-f0-9]{64})$"},
+        "profile": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"},
+        "profile_id": {"type": "integer", "minimum": 0},
+        "placement_start": {"type": "integer", "minimum": 0},
+        "placement_size": {"type": "integer", "minimum": 1},
+        "compute_instances": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/mig_compute_instance"}}
+      }
+    },
     "audit": {
       "type": "object",
-      "required": ["timestamp", "os_id", "os_version", "package_manager", "kernel", "module", "runtime", "packages", "nvidia_smi", "nvml", "fabric_manager_active", "mig_mode"],
+      "required": ["timestamp", "os_id", "os_version", "package_manager", "kernel", "module", "runtime", "packages", "nvidia_smi", "nvml", "fabric_manager_active", "mig_mode", "cuda_compatibility", "package_inventory_complete", "package_inventory_result", "docker_service_active", "docker_service_enabled", "docker_service_unit_file_state", "docker_socket_active", "docker_socket_enabled", "docker_socket_unit_file_state", "nvidia_persistenced_active", "nvidia_persistenced_enabled", "nvidia_persistenced_unit_file_state", "fabric_manager_enabled", "fabric_manager_unit_file_state", "fabric_manager_version", "package_policy", "open_kernel_module_supported", "mig_capable", "mig_mode_pending", "fabric_manager_applicable", "fabric_manager_healthy", "fabric_manager_health_result", "gpu_uuids", "mig_geometry", "mig_device_uuids", "mig_geometry_complete", "mig_geometry_results"],
       "additionalProperties": false,
       "properties": {
         "timestamp": {"type": "string", "format": "date-time"},
@@ -152,7 +235,34 @@
         "nvidia_smi": {"$ref": "#/$defs/command_result"},
         "nvml": {"$ref": "#/$defs/command_result"},
         "fabric_manager_active": {"type": ["boolean", "null"]},
-        "mig_mode": {"type": ["string", "null"]}
+        "mig_mode": {"type": ["string", "null"]},
+        "open_kernel_module_supported": {"type": ["boolean", "null"]},
+        "mig_capable": {"type": ["boolean", "null"]},
+        "mig_mode_pending": {"type": ["string", "null"], "enum": ["enabled", "disabled", "mixed", null]},
+        "cuda_compatibility": {"type": "array", "items": {"$ref": "#/$defs/cuda_compatibility"}},
+        "package_inventory_complete": {"type": "boolean"},
+        "package_inventory_result": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/command_result"}]},
+        "docker_service_active": {"type": ["boolean", "null"]},
+        "docker_service_enabled": {"type": ["boolean", "null"]},
+        "docker_service_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "docker_socket_active": {"type": ["boolean", "null"]},
+        "docker_socket_enabled": {"type": ["boolean", "null"]},
+        "docker_socket_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "nvidia_persistenced_active": {"type": ["boolean", "null"]},
+        "nvidia_persistenced_enabled": {"type": ["boolean", "null"]},
+        "nvidia_persistenced_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "fabric_manager_enabled": {"type": ["boolean", "null"]},
+        "fabric_manager_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "fabric_manager_version": {"type": ["string", "null"]},
+        "fabric_manager_applicable": {"type": ["boolean", "null"]},
+        "fabric_manager_healthy": {"type": ["boolean", "null"]},
+        "fabric_manager_health_result": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/command_result"}]},
+        "gpu_uuids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:GPU-[A-Fa-f0-9-]{16,}|attested:[a-f0-9]{64})$"}},
+        "mig_geometry": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/mig_gpu_instance"}},
+        "mig_device_uuids": {"type": "array", "uniqueItems": true, "maxItems": 64, "items": {"type": "string", "pattern": "^(?:MIG-[A-Fa-f0-9-]{16,}|attested:[a-f0-9]{64})$"}},
+        "mig_geometry_complete": {"type": "boolean"},
+        "mig_geometry_results": {"type": "array", "maxItems": 130, "items": {"$ref": "#/$defs/command_result"}},
+        "package_policy": {"$ref": "#/$defs/package_policy"}
       }
     },
     "plan_action": {
@@ -180,14 +290,87 @@
     },
     "rollback": {
       "type": "object",
-      "required": ["path", "packages", "kernel", "module_version", "commands"],
+      "required": ["path", "packages", "kernel", "module_version", "commands", "schema_version", "created_at", "operation_id", "host_id", "os_id", "os_version", "architecture", "package_manager", "introduced_packages", "module_loaded", "module_names", "module_open_module", "module_signed", "module_installed_version", "module_installed_open_module", "module_installed_signed", "mig_mode", "mig_geometry", "docker_service_active", "docker_service_enabled", "docker_service_unit_file_state", "docker_socket_active", "docker_socket_enabled", "docker_socket_unit_file_state", "nvidia_persistenced_active", "nvidia_persistenced_enabled", "nvidia_persistenced_unit_file_state", "fabric_manager_active", "fabric_manager_enabled", "fabric_manager_unit_file_state", "managed_files", "package_payloads", "gpu_uuids", "integrity_sha256"],
       "additionalProperties": false,
       "properties": {
         "path": {"type": ["string", "null"]},
         "packages": {"type": "array", "items": {"$ref": "#/$defs/package"}},
         "kernel": {"type": "string"},
         "module_version": {"type": ["string", "null"]},
-        "commands": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}
+        "commands": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+        "schema_version": {"type": "string", "const": "2.6"},
+        "created_at": {"type": "string", "format": "date-time"},
+        "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+        "host_id": {"type": "string", "minLength": 1},
+        "os_id": {"type": ["string", "null"]},
+        "os_version": {"type": ["string", "null"]},
+        "architecture": {"type": "string", "minLength": 1},
+        "package_manager": {"type": ["string", "null"], "enum": ["apt-get", "dnf", "yum", "zypper", null]},
+        "introduced_packages": {"type": "array", "items": {"type": "string"}},
+        "module_loaded": {"type": "boolean"},
+        "module_names": {"type": "array", "uniqueItems": true, "items": {"type": "string", "enum": ["nvidia", "nvidia_drm", "nvidia_fs", "nvidia_modeset", "nvidia_peermem", "nvidia_uvm"]}},
+        "module_open_module": {"type": ["boolean", "null"]},
+        "module_signed": {"type": ["boolean", "null"]},
+        "module_installed_version": {"type": ["string", "null"]},
+        "module_installed_open_module": {"type": ["boolean", "null"]},
+        "module_installed_signed": {"type": ["boolean", "null"]},
+        "mig_mode": {"type": ["string", "null"], "enum": ["enabled", "disabled", null]},
+        "mig_geometry": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/mig_gpu_instance"}},
+        "docker_service_active": {"type": ["boolean", "null"]},
+        "docker_service_enabled": {"type": ["boolean", "null"]},
+        "docker_service_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "docker_socket_active": {"type": ["boolean", "null"]},
+        "docker_socket_enabled": {"type": ["boolean", "null"]},
+        "docker_socket_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "nvidia_persistenced_active": {"type": ["boolean", "null"]},
+        "nvidia_persistenced_enabled": {"type": ["boolean", "null"]},
+        "nvidia_persistenced_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "fabric_manager_active": {"type": ["boolean", "null"]},
+        "fabric_manager_enabled": {"type": ["boolean", "null"]},
+        "fabric_manager_unit_file_state": {"type": ["string", "null"], "enum": ["enabled", "disabled", "static", "masked", "not-found", null]},
+        "managed_files": {"type": "array", "items": {"$ref": "#/$defs/file_snapshot"}},
+        "package_payloads": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/package_payload_bundle"}]},
+        "gpu_uuids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:GPU-[A-Fa-f0-9-]{16,}|attested:[a-f0-9]{64})$"}},
+        "integrity_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "package_payload_bundle": {
+      "type": "object",
+      "required": ["directory", "packages", "total_size_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "directory": {"type": "string", "minLength": 10, "maxLength": 255, "pattern": "^[^/\\u0000]+\\.payloads$"},
+        "packages": {"type": "array", "maxItems": 8192, "items": {"$ref": "#/$defs/package_payload"}},
+        "total_size_bytes": {"type": "integer", "minimum": 0, "maximum": 68719476736}
+      }
+    },
+    "package_payload": {
+      "type": "object",
+      "required": ["name", "architecture", "epoch", "version", "format", "filename", "sha256", "size_bytes", "verification", "roles", "signer_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "epoch": {"type": ["string", "null"]},
+        "version": {"type": "string", "minLength": 1},
+        "format": {"type": "string", "enum": ["deb", "rpm"]},
+        "filename": {"type": "string", "pattern": "^[a-f0-9]{64}\\.(?:deb|rpm)$"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 8589934592},
+        "verification": {"type": "string", "enum": ["apt-repository", "rpm-signature"]},
+        "roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["baseline", "forward"]}},
+        "signer_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9a-f]{8,40}$"}}
+      }
+    },
+    "file_snapshot": {
+      "type": "object",
+      "required": ["path", "existed", "content_base64", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "anyOf": [{"enum": ["/etc/docker/daemon.json", "/etc/dnf/modules.d/nvidia-driver.module", "/etc/zypp/locks"]}, {"pattern": "^/var/lib/dnf/modulefailsafe/nvidia-driver:[1-9][0-9]{2,3}-(?:open|dkms):[A-Za-z0-9][A-Za-z0-9_.+@-]{0,127}\\.yaml$"}]},
+        "existed": {"type": "boolean"},
+        "content_base64": {"type": ["string", "null"]},
+        "mode": {"type": ["integer", "null"], "minimum": 0, "maximum": 511}
       }
     }
   }

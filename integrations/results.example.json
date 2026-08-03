@@ -1,52 +1,87 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.5",
+  "repository": "zeroecco/nvidia-converge",
   "release": "v0.1.0",
   "generated_at": "2026-05-06T00:00:00Z",
-  "commit": "0000000",
+  "commit": "0000000000000000000000000000000000000000",
   "operator": "example",
   "overall_status": "blocked",
+  "qualification_wheel": {
+    "name": "nvidia_converge-0.1.0-py3-none-any.whl",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "runs": [
     {
-      "id": "ubuntu-24.04-apt-apply",
-      "workflow_run": "https://github.com/zeroecco/nvidia-converge/actions/runs/0000000000",
+      "id": "ubuntu-24.04",
+      "matrix_id": "ubuntu-24.04",
+      "workflow_run": "https://github.com/zeroecco/nvidia-converge/actions/runs/1",
+      "workflow_run_id": 1,
+      "workflow_run_attempt": 1,
+      "workflow_job": "https://github.com/zeroecco/nvidia-converge/actions/runs/1/job/1",
+      "workflow_job_id": 1,
+      "workflow_path": ".github/workflows/production-gpu-qualification.yml",
+      "head_sha": "0000000000000000000000000000000000000000",
       "runner_labels": ["self-hosted", "nvidia-gpu", "disposable", "ubuntu-24.04"],
       "os_id": "ubuntu",
       "os_version": "24.04",
       "package_manager": "apt-get",
+      "qualification_wheel": {
+        "name": "nvidia_converge-0.1.0-py3-none-any.whl",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
       "desired": "examples/compute-580-open.yaml",
       "apply": true,
       "status": "blocked",
       "started_at": "2026-05-06T00:00:00Z",
       "completed_at": "2026-05-06T00:00:00Z",
+      "capabilities": {
+        "secure_boot": false,
+        "fabric_manager": false,
+        "mig_capable": false,
+        "mig_toggle": false
+      },
       "scenarios": [
         {"name": "doctor", "status": "blocked", "report": null},
+        {"name": "doctor_missing_headers", "status": "blocked", "report": null},
+        {"name": "doctor_module_unloaded", "status": "blocked", "report": null},
+        {"name": "doctor_driver_mismatch", "status": "blocked", "report": null},
+        {"name": "doctor_runtime_missing", "status": "blocked", "report": null},
+        {"name": "doctor_fabric_manager_inactive", "status": "not_applicable", "report": null},
         {"name": "plan", "status": "blocked", "report": null},
         {"name": "install_apply", "status": "blocked", "report": null},
         {"name": "verify_apply", "status": "blocked", "report": null},
         {"name": "lock_apply", "status": "blocked", "report": null},
         {"name": "snapshot", "status": "blocked", "report": null},
         {"name": "rollback_apply", "status": "blocked", "report": null},
-        {"name": "verify_after_rollback", "status": "blocked", "report": null},
+        {"name": "rollback_state_verify", "status": "blocked", "report": null},
+        {"name": "policy_rollback_apply", "status": "blocked", "report": null},
+        {"name": "policy_rollback_state_verify", "status": "blocked", "report": null},
         {"name": "report_schema", "status": "blocked", "report": null}
       ],
       "artifacts": [
         {
-          "name": "gpu-integration-0000000000",
-          "uri": "https://github.com/zeroecco/nvidia-converge/actions/runs/0000000000",
+          "id": 1,
+          "name": "gpu-integration-ubuntu-24.04-1-1",
+          "uri": "https://api.github.com/repos/zeroecco/nvidia-converge/actions/artifacts/1/zip",
           "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
         }
       ],
       "notes": "Example manifest. Replace blocked statuses with real disposable GPU-node results before release promotion."
     }
   ],
+  "qualified_platforms": [],
+  "recipe_path_coverage": {
+    "apt_get": false,
+    "dnf": false,
+    "zypper": false
+  },
   "required_coverage": {
-    "ubuntu_lts": false,
-    "rhel_family": false,
-    "suse_family": false,
     "secure_boot": false,
     "fabric_manager": false,
     "mig_toggle": false,
     "install_apply": false,
-    "rollback_apply": false
+    "rollback_apply": false,
+    "policy_rollback_apply": false,
+    "policy_rollback_state_verify": false
   }
 }

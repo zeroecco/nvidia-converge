@@ -1,0 +1,11 @@
+desired:
+  role: compute
+  driver: 580-open
+  cuda_compat: none
+  secure_boot: signed
+  container_runtime: docker
+  container_test_image: nvidia/cuda:13.1.2-devel-ubuntu22.04@sha256:d8332c008e2ef270e82d286e5245e771f839645683075bba21ad9e4fa59dbcbb
+  fabric_manager: false
+  mig: enabled
+  mig_profile: full
+  kernel_policy: pin-compatible

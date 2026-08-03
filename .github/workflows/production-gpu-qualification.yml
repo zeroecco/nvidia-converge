@@ -1,0 +1,1545 @@
+name: GPU Integration
+
+on:
+  repository_dispatch:
+    types: [production-gpu-qualification]
+
+permissions:
+  contents: read
+
+env:
+  QUALIFICATION_APPLY: "true"
+
+jobs:
+  repository-controls:
+    name: Verify repository controls before GPU allocation
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Bind the dispatch to the live default-branch head
+        env:
+          DISPATCH_ACTION: ${{ github.event.action }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != repository_dispatch \
+            || "$DISPATCH_ACTION" != production-gpu-qualification \
+            || "$GITHUB_REF" != refs/heads/main \
+            || ! "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "GPU qualification dispatch is not bound to the main branch" >&2
+            exit 2
+          fi
+          repository_json="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}"
+          )"
+          live_default_branch="$(
+            jq -er '.default_branch | select(. == "main")' \
+              <<<"$repository_json"
+          )"
+          live_main_sha="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/commits/${live_default_branch}" \
+              --jq '.sha | select(type == "string" and test("^[0-9a-f]{40}$"))'
+          )"
+          if [[ "$live_main_sha" != "$GITHUB_SHA" ]]; then
+            echo "GPU qualification dispatch is not the current live main head" >&2
+            exit 2
+          fi
+
+      - name: Check out repository-control checker
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up exact control-check Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Refuse missing or ineffective production controls
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -I scripts/check_repository_controls.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --scope gpu
+
+  qualification-build:
+    name: Build trusted qualification wheel
+    needs: repository-controls
+    runs-on: ubuntu-latest
+    outputs:
+      wheel-name: ${{ steps.package.outputs.wheel-name }}
+      wheel-sha256: ${{ steps.package.outputs.wheel-sha256 }}
+
+    steps:
+      - name: Refuse non-main qualification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "GPU qualification is restricted to refs/heads/main" >&2
+            exit 2
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up exact build Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Install locked build tooling
+        run: |
+          python -m pip install \
+            --require-hashes --no-deps \
+            --requirement requirements/build.lock
+
+      - name: Build clean-source qualification wheel
+        id: package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          build_root="$(mktemp -d)"
+          trap 'rm -rf -- "$build_root"' EXIT
+          mkdir -p "$build_root/source" qualification-dist
+          git archive --format=tar "$GITHUB_SHA" \
+            | tar -xf - -C "$build_root/source"
+          export SOURCE_DATE_EPOCH
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          export PYTHONHASHSEED=0
+          export TZ=UTC
+          export LC_ALL=C.UTF-8
+          python -m build --wheel --no-isolation \
+            --outdir qualification-dist "$build_root/source"
+
+          mapfile -t wheels < <(
+            find qualification-dist -mindepth 1 -maxdepth 1 \
+              -type f -name '*.whl' -print
+          )
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "qualification build must produce exactly one wheel" >&2
+            exit 2
+          fi
+          wheel="${wheels[0]}"
+          wheel_name="$(basename "$wheel")"
+          if [[ ! "$wheel_name" =~ ^nvidia_converge-[0-9][0-9A-Za-z.]*-py3-none-any\.whl$ ]]; then
+            echo "unexpected qualification wheel name: $wheel_name" >&2
+            exit 2
+          fi
+          python -m zipfile --test "$wheel"
+          python -I - "$wheel" <<'PY'
+          import stat
+          import sys
+          from pathlib import PurePosixPath
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as archive:
+              names = archive.namelist()
+              if not names or len(names) != len(set(names)):
+                  raise SystemExit("qualification wheel has an empty or duplicate inventory")
+              for member in archive.infolist():
+                  path = PurePosixPath(member.filename)
+                  if (
+                      member.filename.startswith("/")
+                      or "\\" in member.filename
+                      or any(part in {"", ".", ".."} for part in path.parts)
+                      or stat.S_ISLNK(member.external_attr >> 16)
+                  ):
+                      raise SystemExit(
+                          f"qualification wheel has unsafe member {member.filename!r}"
+                      )
+                  if not (
+                      member.filename.startswith("nvidia_converge/")
+                      or (
+                          member.filename.startswith("nvidia_converge-")
+                          and ".dist-info/" in member.filename
+                      )
+                  ):
+                      raise SystemExit(
+                          f"qualification wheel has unexpected member {member.filename!r}"
+                      )
+              required = {
+                  "nvidia_converge/__init__.py",
+                  "nvidia_converge/__main__.py",
+                  "nvidia_converge/py.typed",
+              }
+              if not required.issubset(names):
+                  raise SystemExit("qualification wheel is missing required package members")
+          PY
+          wheel_sha256="$(sha256sum -- "$wheel" | cut -d ' ' -f 1)"
+          printf '%s  %s\n' "$wheel_sha256" "$wheel_name" \
+            > qualification-dist/SHA256SUMS
+          (
+            cd qualification-dist
+            sha256sum --check --strict -- SHA256SUMS
+          )
+          test "$(find qualification-dist -mindepth 1 -maxdepth 1 -printf . | wc -c)" = 2
+          printf 'wheel-name=%s\n' "$wheel_name" >> "$GITHUB_OUTPUT"
+          printf 'wheel-sha256=%s\n' "$wheel_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Retain qualification wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualification-wheel-${{ github.sha }}
+          path: qualification-dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  gpu:
+    name: ${{ matrix.id }}
+    needs: [repository-controls, qualification-build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: ubuntu-24.04
+            labels: [self-hosted, nvidia-gpu, disposable, ubuntu-24.04]
+            desired: examples/compute-580-open.yaml
+          - id: rhel-9
+            labels: [self-hosted, nvidia-gpu, disposable, rhel-9]
+            desired: examples/compute-580-open.yaml
+          - id: sles-15
+            labels: [self-hosted, nvidia-gpu, disposable, sles-15]
+            desired: examples/compute-580-open.yaml
+          - id: secure-boot
+            labels: [self-hosted, nvidia-gpu, disposable, ubuntu-24.04, secure-boot]
+            desired: examples/compute-580-open.yaml
+          - id: fabric-manager
+            labels: [self-hosted, nvidia-gpu, disposable, ubuntu-24.04, fabric-manager]
+            desired: examples/compute-580-open-fabric-manager.yaml
+          - id: mig-toggle
+            labels: [self-hosted, nvidia-gpu, disposable, ubuntu-24.04, mig-capable]
+            desired: examples/compute-580-open-mig.yaml
+    runs-on:
+      group: nvidia-converge-gpu
+      labels: ${{ matrix.labels }}
+    environment: gpu-qualification
+    timeout-minutes: 120
+    env:
+      PATH: /usr/sbin:/usr/bin:/sbin:/bin:/usr/local/sbin:/usr/local/bin
+      DESIRED_FILE: ${{ matrix.desired }}
+      QUALIFICATION_WHEEL_NAME: ${{ needs.qualification-build.outputs.wheel-name }}
+      QUALIFICATION_WHEEL_SHA256: ${{ needs.qualification-build.outputs.wheel-sha256 }}
+      REPORT_PREFIX: ${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+      REPORT_ROOT: /var/lib/nvidia-converge/reports
+      QUALIFICATION_ROOT: /opt/nvidia-converge/qualification/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
+      QUALIFICATION_PYTHON: /opt/nvidia-converge/qualification/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}/venv/bin/python
+      QUALIFICATION_DESIRED: /opt/nvidia-converge/qualification/${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}/inputs/desired.yaml
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download trusted qualification wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: qualification-wheel-${{ github.sha }}
+          path: ${{ runner.temp }}/nvidia-converge-qualification-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
+
+      - name: Bind qualification artifact path
+        shell: bash
+        run: |
+          qualification_download="${RUNNER_TEMP}/nvidia-converge-qualification-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.id }}"
+          test -d "$qualification_download"
+          printf 'QUALIFICATION_DOWNLOAD=%s\n' \
+            "$qualification_download" >> "$GITHUB_ENV"
+
+      - name: Capture pre-state
+        shell: bash
+        run: |
+          mkdir -p artifacts/pre artifacts/reports
+          uname -a | tee artifacts/pre/uname.txt
+          if command -v nvidia-smi; then nvidia-smi -q > artifacts/pre/nvidia-smi-q.txt || true; fi
+          if command -v dkms; then dkms status > artifacts/pre/dkms-status.txt || true; fi
+          if command -v modinfo; then modinfo nvidia > artifacts/pre/modinfo-nvidia.txt || true; fi
+          for log in /var/log/apt/history.log /var/log/dnf.log /var/log/yum.log /var/log/zypp/history; do
+            if [ -r "$log" ]; then cp "$log" "artifacts/pre/$(basename "$log")"; fi
+          done
+
+      - name: Select supported Python interpreter
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/sbin:/usr/local/bin
+
+          validate_trusted_path() {
+            local kind="$1" path="$2" canonical current metadata owner mode next
+            if [[ -z "$path" || "$path" != /* || "$path" == *$'\n'* ]]; then
+              echo "Python trust path is empty, relative, or malformed: $path" >&2
+              return 1
+            fi
+            canonical="$(realpath -m -- "$path")"
+            if [[ "$canonical" != "$path" ]]; then
+              echo "Python trust path has a symlinked or noncanonical resolution: $path -> $canonical" >&2
+              return 1
+            fi
+            if [[ -e "$path" || -L "$path" ]]; then
+              if [[ -L "$path" ]]; then
+                echo "Python trust path is a symbolic link: $path" >&2
+                return 1
+              fi
+              case "$kind" in
+                file) [[ -f "$path" ]] ;;
+                directory) [[ -d "$path" ]] ;;
+                component) [[ -f "$path" || -d "$path" ]] ;;
+                *) return 1 ;;
+              esac || {
+                echo "Python trust path has the wrong type: $path" >&2
+                return 1
+              }
+              current="$path"
+            elif [[ "$kind" == component ]]; then
+              current="$(dirname -- "$path")"
+              while [[ ! -e "$current" && ! -L "$current" ]]; do
+                next="$(dirname -- "$current")"
+                [[ "$next" != "$current" ]] || return 1
+                current="$next"
+              done
+            else
+              echo "required Python trust path does not exist: $path" >&2
+              return 1
+            fi
+            while :; do
+              if [[ -L "$current" || ! -e "$current" ]]; then
+                echo "Python trust path ancestry is unsafe: $current" >&2
+                return 1
+              fi
+              metadata="$(stat -Lc '%u %a' -- "$current")"
+              owner="${metadata%% *}"
+              mode="${metadata##* }"
+              if [[ "$owner" != 0 ]] || (( (8#$mode & 8#022) != 0 )); then
+                echo "Python trust path is not root-owned and non-writable: $current" >&2
+                return 1
+              fi
+              [[ "$current" == / ]] && break
+              current="$(dirname -- "$current")"
+            done
+          }
+
+          selected_python=""
+          for candidate in python3.12 python3.11 python3.10 python3; do
+            candidate_path="$(type -P -- "$candidate" || true)"
+            if [ -z "$candidate_path" ]; then
+              continue
+            fi
+            candidate_path="$(readlink -f -- "$candidate_path")"
+            if ! validate_trusted_path file "$candidate_path"; then
+              continue
+            fi
+            if "$candidate_path" -I -S - <<'PY'
+          import ensurepip
+          import sys
+          import venv
+
+          raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+          PY
+            then
+              mapfile -d '' -t python_trust_paths < <(
+                "$candidate_path" -I -S - <<'PY'
+          import ensurepip
+          import sys
+          import sysconfig
+          import venv
+          from pathlib import Path
+
+          module_paths = sorted(
+              {
+                  module_path
+                  for module in sys.modules.values()
+                  if isinstance((module_path := getattr(module, "__file__", None)), str)
+              }
+          )
+          package_paths = sorted(
+              str(path)
+              for package in (ensurepip, venv)
+              for root in (Path(package.__file__).parent,)
+              for path in (root, *root.rglob("*"))
+          )
+
+          values = [
+              sys.base_prefix,
+              sys.exec_prefix,
+              sysconfig.get_path("stdlib"),
+              sysconfig.get_path("platstdlib"),
+              *sys.path,
+              *module_paths,
+              *package_paths,
+          ]
+          if not all(isinstance(value, str) for value in values):
+              raise SystemExit(2)
+          sys.stdout.buffer.write(
+              b"".join(value.encode("utf-8") + b"\0" for value in values)
+          )
+          PY
+              )
+              if (( ${#python_trust_paths[@]} < 5 )); then
+                continue
+              fi
+              trusted=true
+              for index in 0 1 2 3; do
+                if ! validate_trusted_path directory "${python_trust_paths[$index]}"; then
+                  trusted=false
+                fi
+              done
+              for path in "${python_trust_paths[@]:4}"; do
+                if ! validate_trusted_path component "$path"; then
+                  trusted=false
+                fi
+              done
+              if [[ "$trusted" == true ]]; then
+                selected_python="$candidate_path"
+                break
+              fi
+            fi
+          done
+          if [ -z "$selected_python" ]; then
+            echo "no Python >=3.10 interpreter with venv/ensurepip support found; provision Python 3.11 or 3.12 (Python 3.10 is also supported)" >&2
+            exit 2
+          fi
+          python_version="$("$selected_python" -I -c 'import platform; print(platform.python_version())')"
+          echo "Using $selected_python (Python $python_version)"
+          echo "PYTHON_BIN=$selected_python" >> "$GITHUB_ENV"
+
+      - name: Install downloaded qualification wheel
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ ! "$QUALIFICATION_WHEEL_NAME" =~ ^nvidia_converge-[0-9][0-9A-Za-z.]*-py3-none-any\.whl$ ]] \
+            || [[ ! "$QUALIFICATION_WHEEL_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "hosted build returned unsafe qualification metadata" >&2
+            exit 2
+          fi
+          if [[ ! -d "$QUALIFICATION_DOWNLOAD" || -L "$QUALIFICATION_DOWNLOAD" ]]; then
+            echo "qualification artifact directory is missing or unsafe" >&2
+            exit 2
+          fi
+          if [ "$(find "$QUALIFICATION_DOWNLOAD" -mindepth 1 -maxdepth 1 -printf . | wc -c)" != 2 ]; then
+            echo "qualification artifact inventory is not exact" >&2
+            exit 2
+          fi
+          wheel="$QUALIFICATION_DOWNLOAD/$QUALIFICATION_WHEEL_NAME"
+          checksum_manifest="$QUALIFICATION_DOWNLOAD/SHA256SUMS"
+          if [[ ! -f "$wheel" || -L "$wheel" \
+            || ! -f "$checksum_manifest" || -L "$checksum_manifest" ]]; then
+            echo "qualification artifact contains a missing or unsafe file" >&2
+            exit 2
+          fi
+          expected_manifest="$(mktemp)"
+          trap 'rm -f -- "$expected_manifest"' EXIT
+          printf '%s  %s\n' \
+            "$QUALIFICATION_WHEEL_SHA256" "$QUALIFICATION_WHEEL_NAME" \
+            > "$expected_manifest"
+          cmp --silent -- "$expected_manifest" "$checksum_manifest" || {
+            echo "qualification checksum manifest does not match hosted outputs" >&2
+            exit 2
+          }
+          (
+            cd "$QUALIFICATION_DOWNLOAD"
+            sha256sum --check --strict -- SHA256SUMS
+          )
+          "$PYTHON_BIN" -I -m zipfile --test "$wheel"
+
+          if ! "$PYTHON_BIN" -m venv .venv; then
+            echo "selected Python $PYTHON_BIN cannot create a virtual environment; install its venv/ensurepip support" >&2
+            exit 2
+          fi
+          .venv/bin/python -I -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
+          .venv/bin/python -m pip --isolated install \
+            --no-index --no-deps "$wheel"
+          .venv/bin/python -I -m nvidia_converge --version
+
+      - name: Validate desired-state input path
+        shell: bash
+        run: |
+          desired_path="$(realpath -- "$DESIRED_FILE")"
+          case "$desired_path" in
+            "$GITHUB_WORKSPACE"/examples/*.yaml) ;;
+            *) echo "desired state must be a checked-in examples/*.yaml file" >&2; exit 2 ;;
+          esac
+          echo "DESIRED_PATH=$desired_path" >> "$GITHUB_ENV"
+
+      - name: Stage trusted qualification runtime
+        id: qualification
+        if: ${{ env.QUALIFICATION_APPLY == 'true' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/sbin:/usr/local/bin
+
+          python_now="$(readlink -f -- "$PYTHON_BIN")"
+          if [[ "$python_now" != "$PYTHON_BIN" || ! -f "$python_now" \
+            || -L "$python_now" ]]; then
+            echo "selected Python changed before privileged staging" >&2
+            exit 2
+          fi
+          current="$python_now"
+          while :; do
+            metadata="$(stat -Lc '%u %a' -- "$current")"
+            owner="${metadata%% *}"
+            mode="${metadata##* }"
+            if [[ "$owner" != 0 ]] || (( (8#$mode & 8#022) != 0 )); then
+              echo "selected Python ancestry became unsafe: $current" >&2
+              exit 2
+            fi
+            [[ "$current" == / ]] && break
+            current="$(dirname -- "$current")"
+            if [[ -L "$current" || ! -e "$current" ]]; then
+              echo "selected Python ancestry changed before privileged staging" >&2
+              exit 2
+            fi
+          done
+
+          expected_root="/opt/nvidia-converge/qualification/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.id }}"
+          test "$QUALIFICATION_ROOT" = "$expected_root"
+          test "$QUALIFICATION_PYTHON" = "$expected_root/venv/bin/python"
+          test "$QUALIFICATION_DESIRED" = "$expected_root/inputs/desired.yaml"
+          if sudo test -e "$QUALIFICATION_ROOT" \
+            || sudo test -L "$QUALIFICATION_ROOT"; then
+            echo "qualification run root already exists" >&2
+            exit 2
+          fi
+
+          if [ "$(git rev-parse --verify HEAD)" != "$GITHUB_SHA" ]; then
+            echo "checked-out commit does not match the dispatched workflow SHA" >&2
+            exit 2
+          fi
+          git ls-files --error-unmatch -- "$DESIRED_FILE" >/dev/null
+          if ! git diff --quiet HEAD -- "$DESIRED_FILE"; then
+            echo "tracked desired-state input differs from $GITHUB_SHA" >&2
+            exit 2
+          fi
+
+          mkdir -p artifacts/pre
+          desired_source="$(
+            mktemp -d "${RUNNER_TEMP:-/tmp}/nvidia-converge-desired.XXXXXX"
+          )"
+          cleanup_desired_source() {
+            rm -rf -- "$desired_source"
+          }
+          trap cleanup_desired_source EXIT HUP INT TERM
+          git archive --format=tar "$GITHUB_SHA" "$DESIRED_FILE" \
+            | tar -xf - -C "$desired_source"
+          archived_desired="$desired_source/$DESIRED_FILE"
+          archived_desired_resolved="$(realpath -- "$archived_desired")"
+          case "$archived_desired_resolved" in
+            "$desired_source"/examples/*.yaml) ;;
+            *) echo "archived desired state escapes the committed examples directory" >&2; exit 2 ;;
+          esac
+          test -f "$archived_desired"
+          test ! -L "$archived_desired"
+          install -m 0400 -- \
+            "$archived_desired" artifacts/pre/qualification-desired.yaml
+          desired_sha256="$(
+            sha256sum artifacts/pre/qualification-desired.yaml | awk '{print $1}'
+          )"
+          cleanup_desired_source
+          trap - EXIT HUP INT TERM
+          wheel="$QUALIFICATION_DOWNLOAD/$QUALIFICATION_WHEEL_NAME"
+          .venv/bin/python -m zipfile --test "$wheel"
+          wheel_sha256="$(sha256sum "$wheel" | awk '{print $1}')"
+          test "$wheel_sha256" = "$QUALIFICATION_WHEEL_SHA256"
+          printf '%s  %s\n%s  %s\n' \
+            "$wheel_sha256" "packages/$(basename "$wheel")" \
+            "$desired_sha256" "inputs/desired.yaml" \
+            > artifacts/pre/qualification-inputs.sha256
+
+          validate_trusted_directory() {
+            local metadata mode owner path="$1"
+            if ! sudo test -d "$path" || sudo test -L "$path"; then
+              echo "qualification parent is not a real directory: $path" >&2
+              return 1
+            fi
+            metadata="$(sudo stat -Lc '%u %a' -- "$path")"
+            owner="${metadata%% *}"
+            mode="${metadata##* }"
+            if [ "$owner" != 0 ] || (( (8#$mode & 8#022) != 0 )); then
+              echo "qualification parent is not root-owned and non-writable: $path" >&2
+              return 1
+            fi
+          }
+          ensure_trusted_directory() {
+            local created=false mode="$1" path="$2"
+            if sudo test -e "$path" || sudo test -L "$path"; then
+              validate_trusted_directory "$path"
+            else
+              sudo install -d -o root -g root -m "$mode" "$path"
+              created=true
+            fi
+            validate_trusted_directory "$path"
+            if [ "$created" = true ]; then
+              test "$(sudo stat -Lc '%a' -- "$path")" = "${mode#0}"
+            fi
+          }
+          validate_trusted_directory /opt
+          ensure_trusted_directory 0755 /opt/nvidia-converge
+          ensure_trusted_directory 0700 /opt/nvidia-converge/qualification
+          sudo install -d -o root -g root -m 0700 \
+            "$QUALIFICATION_ROOT" "$QUALIFICATION_ROOT/inputs" \
+            "$QUALIFICATION_ROOT/packages"
+          validate_trusted_directory "$QUALIFICATION_ROOT"
+          test "$(sudo stat -Lc '%a' -- "$QUALIFICATION_ROOT")" = 700
+          qualification_wheel="$QUALIFICATION_ROOT/packages/$(basename "$wheel")"
+          sudo install -o root -g root -m 0400 -- "$wheel" "$qualification_wheel"
+          sudo install -o root -g root -m 0400 -- \
+            artifacts/pre/qualification-desired.yaml "$QUALIFICATION_DESIRED"
+          sudo install -o root -g root -m 0400 -- \
+            artifacts/pre/qualification-inputs.sha256 \
+            "$QUALIFICATION_ROOT/SHA256SUMS"
+
+          test "$(sudo sha256sum "$qualification_wheel" | awk '{print $1}')" = \
+            "$wheel_sha256"
+          test "$(sudo sha256sum "$QUALIFICATION_DESIRED" | awk '{print $1}')" = \
+            "$desired_sha256"
+          sudo sh -c 'cd "$1" && sha256sum --check SHA256SUMS' \
+            qualification-check "$QUALIFICATION_ROOT"
+          sudo "$PYTHON_BIN" -I -S -m venv "$QUALIFICATION_ROOT/venv"
+          qualification_python_resolved="$(
+            sudo readlink -f -- "$QUALIFICATION_PYTHON"
+          )"
+          case "$qualification_python_resolved" in
+            "$PYTHON_BIN"|"$QUALIFICATION_ROOT"/venv/bin/python*) ;;
+            *) echo "qualification interpreter escapes trusted roots" >&2; exit 2 ;;
+          esac
+          sudo env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+            "$QUALIFICATION_PYTHON" -I -m pip --isolated install \
+            --no-index --no-deps "$qualification_wheel"
+          sudo chown -R root:root "$QUALIFICATION_ROOT"
+          sudo chmod -R go-w "$QUALIFICATION_ROOT"
+          unsafe_entry="$(
+            sudo find "$QUALIFICATION_ROOT" -xdev \
+              \( ! -user root -o \( ! -type l -perm /022 \) \) \
+              -print -quit
+          )"
+          if [ -n "$unsafe_entry" ]; then
+            echo "qualification runtime contains an unsafe entry: $unsafe_entry" >&2
+            exit 2
+          fi
+          mapfile -t qualification_links < <(
+            sudo find "$QUALIFICATION_ROOT" -xdev -type l -print
+          )
+          for link in "${qualification_links[@]}"; do
+            link_target="$(sudo readlink -f -- "$link")"
+            case "$link_target" in
+              "$PYTHON_BIN"|"$QUALIFICATION_ROOT"/*) ;;
+              *) echo "qualification symlink escapes trusted roots: $link" >&2; exit 2 ;;
+            esac
+          done
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge --version
+
+      - name: Validate matrix capability preconditions
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.qualification.outcome == 'success' }}
+        env:
+          MATRIX_ID: ${{ matrix.id }}
+        run: |
+          if sudo test -e /run/nvidia-converge/fault-cleanup-required; then
+            echo "runner is quarantined by an incomplete controlled-fault cleanup" >&2
+            exit 2
+          fi
+          sudo env \
+            MATRIX_ID="$MATRIX_ID" \
+            QUALIFICATION_DESIRED="$QUALIFICATION_DESIRED" \
+            "$QUALIFICATION_PYTHON" -I - <<'PY'
+          import os
+
+          from nvidia_converge.audit import audit_host
+          from nvidia_converge.desired import load_desired
+          from nvidia_converge.runner import CommandRunner
+
+          matrix_id = os.environ["MATRIX_ID"]
+          desired = load_desired(os.environ["QUALIFICATION_DESIRED"])
+          audit = audit_host(CommandRunner())
+          if matrix_id == "fabric-manager" and desired.fabric_manager is not True:
+              raise SystemExit("fabric-manager matrix must use its FM-required desired state")
+          if matrix_id != "fabric-manager" and desired.fabric_manager is not False:
+              raise SystemExit("only the fabric-manager matrix may require Fabric Manager")
+          if matrix_id == "secure-boot" and audit.kernel.secure_boot_enabled is not True:
+              raise SystemExit("secure-boot runner does not have Secure Boot enabled")
+          if audit.kernel.secure_boot_enabled not in {True, False}:
+              raise SystemExit("runner does not expose an observable Secure Boot state")
+          if matrix_id == "fabric-manager" and audit.fabric_manager_active is not True:
+              raise SystemExit("fabric-manager runner does not have active Fabric Manager")
+          if audit.open_kernel_module_supported is not True:
+              raise SystemExit("runner does not prove support for the open kernel module")
+          if matrix_id == "mig-toggle" and audit.mig_capable is not True:
+              raise SystemExit("mig-toggle runner does not expose MIG capability")
+          if audit.mig_capable not in {True, False}:
+              raise SystemExit("runner does not expose an observable MIG capability")
+          if audit.mig_mode != "disabled" or audit.mig_mode_pending != "disabled":
+              raise SystemExit("every controlled fixture must begin with stable disabled MIG mode")
+          if (
+              audit.mig_geometry_complete is not True
+              or audit.mig_geometry
+              or audit.mig_device_uuids
+          ):
+              raise SystemExit("controlled fixture must begin with complete empty MIG geometry")
+          PY
+
+      - name: Stage package policy
+        id: lock
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.qualification.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          root_report="${REPORT_ROOT}/${REPORT_PREFIX}-lock.json"
+          set +e
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge lock --desired "$QUALIFICATION_DESIRED" --apply --allow-disruption --out "$root_report"
+          status=$?
+          set -e
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$root_report" artifacts/reports/lock.json
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "${root_report}.journal.jsonl" artifacts/reports/lock.journal.jsonl
+          exit "$status"
+
+      - name: Retain package-policy rollback snapshot
+        id: retain_policy_snapshot
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' && steps.lock.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/reports/lock.json").read_text(encoding="utf-8"))
+          snapshot = report.get("rollback", {}).get("path")
+          if not snapshot:
+              raise SystemExit("lock report did not include its pre-policy rollback snapshot")
+          Path("artifacts/reports/policy-rollback-snapshot-path.txt").write_text(
+              snapshot + "\n", encoding="utf-8"
+          )
+          PY
+          snapshot="$(cat artifacts/reports/policy-rollback-snapshot-path.txt)"
+          sudo cp -- "$snapshot" artifacts/pre/policy-rollback-snapshot.json
+          sudo chown "$(id -u):$(id -g)" artifacts/pre/policy-rollback-snapshot.json
+          sha256sum artifacts/pre/policy-rollback-snapshot.json > artifacts/pre/policy-rollback-snapshot.sha256
+
+      - name: Snapshot after package-policy staging
+        id: snapshot
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.lock.outcome == 'success' && steps.retain_policy_snapshot.outcome == 'success' }}
+        shell: bash
+        run: |
+          root_report="${REPORT_ROOT}/${REPORT_PREFIX}-snapshot.json"
+          set +e
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge snapshot --desired "$QUALIFICATION_DESIRED" --apply --out "$root_report"
+          status=$?
+          set -e
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$root_report" artifacts/reports/snapshot.json
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "${root_report}.journal.jsonl" artifacts/reports/snapshot.journal.jsonl
+          exit "$status"
+
+      - name: Retain canonical post-policy rollback snapshot
+        id: retain_snapshot
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.snapshot.outcome == 'success' }}
+        shell: bash
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("artifacts/reports/snapshot.json").read_text(encoding="utf-8"))
+          snapshot = report.get("rollback", {}).get("path")
+          if not snapshot:
+              raise SystemExit("snapshot report did not include a persisted rollback snapshot path")
+          Path("artifacts/reports/rollback-snapshot-path.txt").write_text(snapshot + "\n", encoding="utf-8")
+          PY
+          snapshot="$(cat artifacts/reports/rollback-snapshot-path.txt)"
+          sudo cp -- "$snapshot" artifacts/pre/rollback-snapshot.json
+          sudo chown "$(id -u):$(id -g)" artifacts/pre/rollback-snapshot.json
+          sha256sum artifacts/pre/rollback-snapshot.json > artifacts/pre/rollback-snapshot.sha256
+
+      - name: Plan after package-policy staging
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.retain_snapshot.outcome == 'success' }}
+        shell: bash
+        run: |
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge plan \
+            --desired "$QUALIFICATION_DESIRED" \
+            --out artifacts/reports/plan.json
+          sudo chown "$(id -u):$(id -g)" artifacts/reports/plan.json
+
+      - name: Validate staged policy and controlled pre-drift
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.retain_snapshot.outcome == 'success' }}
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from nvidia_converge.desired import load_desired
+
+          report = json.loads(
+              Path("artifacts/reports/plan.json").read_text(encoding="utf-8")
+          )
+          desired = load_desired(os.environ["DESIRED_PATH"])
+          expected_package = "nvidia-container-toolkit"
+          if desired.cuda_compat != "none":
+              raise SystemExit(
+                  "integration qualification does not model CUDA forward-compatibility loaders"
+              )
+          installed = {
+              package["name"]
+              for package in report["audit"]["packages"]
+              if package["installed"]
+          }
+          error_findings = {
+              finding["id"]
+              for finding in report["findings"]
+              if finding["severity"] == "error"
+          }
+          actions = {action["id"]: action for action in report["plan"]}
+          install_action = actions.get("install.packages")
+          configure_action = actions.get("configure.docker-runtime")
+          runtime = report["audit"]["runtime"]
+          if any(action_id.startswith("lock.") for action_id in actions):
+              raise SystemExit("post-lock plan still contains a package-policy mutation")
+          if expected_package in installed:
+              raise SystemExit(
+                  f"controlled base fixture already has {expected_package} installed"
+              )
+          if runtime != {
+              "docker_installed": True,
+              "nvidia_container_runtime_installed": False,
+              "docker_gpus_usable": False,
+          }:
+              raise SystemExit(
+                  "controlled base fixture must have Docker but no NVIDIA toolkit/runtime"
+              )
+          if error_findings != {
+              "container-toolkit.missing",
+              "docker.nvidia-runtime-missing",
+          }:
+              raise SystemExit(
+                  "controlled base fixture must differ only by its missing NVIDIA container toolkit/runtime"
+              )
+          if not isinstance(install_action, dict) or not any(
+              expected_package in command for command in install_action["commands"]
+          ):
+              raise SystemExit(
+                  "post-lock plan does not bind the controlled drift to install.packages"
+              )
+          expected_configure = {
+              ("nvidia-ctk", "runtime", "configure", "--runtime=docker"),
+              ("systemctl", "restart", "docker"),
+          }
+          observed_configure = (
+              {
+                  tuple(command)
+                  for command in configure_action["commands"]
+              }
+              if isinstance(configure_action, dict)
+              else set()
+          )
+          if observed_configure != expected_configure:
+              raise SystemExit(
+                  "post-lock plan does not bind NVIDIA runtime configuration and Docker restart"
+              )
+          PY
+
+      - name: Install
+        id: install
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.retain_snapshot.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          root_report="${REPORT_ROOT}/${REPORT_PREFIX}-install.json"
+          set +e
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge install --desired "$QUALIFICATION_DESIRED" --apply --allow-disruption --out "$root_report"
+          status=$?
+          set -e
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$root_report" artifacts/reports/install.json
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "${root_report}.journal.jsonl" artifacts/reports/install.journal.jsonl
+          exit "$status"
+
+      - name: Verify
+        id: verify
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.install.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          root_report="${REPORT_ROOT}/${REPORT_PREFIX}-verify.json"
+          set +e
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge verify --desired "$QUALIFICATION_DESIRED" --apply --allow-disruption --out "$root_report"
+          status=$?
+          set -e
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$root_report" artifacts/reports/verify.json
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "${root_report}.journal.jsonl" artifacts/reports/verify.journal.jsonl
+          exit "$status"
+
+      - name: Doctor after install
+        id: doctor
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.verify.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge doctor \
+            --desired "$QUALIFICATION_DESIRED" \
+            --out artifacts/reports/doctor.json
+          sudo chown "$(id -u):$(id -g)" artifacts/reports/doctor.json
+
+      - name: Controlled doctor fault injection
+        id: doctor_faults
+        if: ${{ env.QUALIFICATION_APPLY == 'true' && steps.doctor.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          MATRIX_ID: ${{ matrix.id }}
+        run: |
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          sudo env \
+            DESIRED_PATH="$QUALIFICATION_DESIRED" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            MATRIX_ID="$MATRIX_ID" \
+            QUALIFICATION_ROOT="$QUALIFICATION_ROOT" \
+            WORKSPACE="$PWD" \
+            PYTHON_BIN="$QUALIFICATION_PYTHON" \
+            bash -Eeuo pipefail <<'BASH'
+          cd "$WORKSPACE"
+          mkdir -p artifacts/fault-control artifacts/restoration
+
+          lock_dir=/run/nvidia-converge
+          lock_path="$lock_dir/operation.lock"
+          test "$(stat -c '%U:%a' "$lock_dir")" = "root:700"
+          test -f "$lock_path"
+          test ! -L "$lock_path"
+          test "$(stat -c '%U:%a:%h' "$lock_path")" = "root:600:1"
+          exec {operation_lock_fd}>>"$lock_path"
+          flock --exclusive --nonblock "$operation_lock_fd"
+          quarantine_marker="$lock_dir/fault-cleanup-required"
+          test ! -e "$quarantine_marker"
+          printf '%s\n' \
+            "run=${GITHUB_RUN_ID} attempt=${GITHUB_RUN_ATTEMPT} matrix=${MATRIX_ID}" \
+            > "$quarantine_marker"
+          chmod 600 "$quarantine_marker"
+
+          validate_fault_report() {
+            local report_path="$1"
+            local expected_finding="$2"
+            local returncode="$3"
+            "$PYTHON_BIN" -I - "$report_path" "$expected_finding" "$returncode" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          expected_finding = sys.argv[2]
+          returncode = int(sys.argv[3])
+          report = json.loads(path.read_text(encoding="utf-8"))
+          findings = {finding["id"] for finding in report["findings"]}
+          if returncode != 2 or expected_finding not in findings:
+              raise SystemExit(
+                  f"live fault report {path} did not diagnose {expected_finding}"
+              )
+          if (
+              report["command"] != "doctor"
+              or report["mode"] != "dry-run"
+              or report["outcome"] != "failed"
+              or report["exit_code"] != 2
+              or report["incomplete"] is not False
+          ):
+              raise SystemExit(f"live fault report {path} is internally inconsistent")
+          PY
+          }
+
+          run_fault_doctor() {
+            local slug="$1"
+            local expected_finding="$2"
+            local desired_path="${3:-$DESIRED_PATH}"
+            local report="artifacts/reports/doctor-${slug}.json"
+            local status
+            set +e
+            "$PYTHON_BIN" -I -m nvidia_converge doctor \
+              --desired "$desired_path" --out "$report"
+            status=$?
+            set -e
+            validate_fault_report "$report" "$expected_finding" "$status"
+          }
+
+          run_restoration_doctor() {
+            local slug="$1"
+            local report="artifacts/restoration/doctor-${slug}.json"
+            "$PYTHON_BIN" -I -m nvidia_converge doctor \
+              --desired "$DESIRED_PATH" --out "$report"
+          }
+
+          assert_no_active_workloads() {
+            local permitted_pids="${1:-}"
+            PERMITTED_SERVICE_PIDS="$permitted_pids" "$PYTHON_BIN" -I - <<'PY'
+          import os
+
+          from nvidia_converge.audit import audit_host
+          from nvidia_converge.gpu_safety import probe_active_gpu_workloads
+          from nvidia_converge.runner import CommandRunner
+
+          runner = CommandRunner()
+          audit = audit_host(runner)
+          result, workloads = probe_active_gpu_workloads(runner, audit)
+          if result.returncode != 0 or workloads is None:
+              raise SystemExit(f"active-workload probe failed closed: {result.stderr}")
+          permitted = set(os.environ.get("PERMITTED_SERVICE_PIDS", "").split())
+          unexpected = [
+              workload
+              for workload in workloads
+              if not (
+                  workload.startswith("pid:")
+                  and workload.removeprefix("pid:") in permitted
+              )
+          ]
+          if unexpected:
+              raise SystemExit(
+                  "active GPU workloads block controlled fault injection: "
+                  + ", ".join(unexpected)
+              )
+          PY
+          }
+
+          service_candidates=(nvidia-fabricmanager nvidia-persistenced nvidia-powerd)
+          permitted_service_pids=()
+          for service in "${service_candidates[@]}"; do
+            service_pid="$(systemctl show --property MainPID --value "$service" 2>/dev/null || true)"
+            if [[ "$service_pid" =~ ^[1-9][0-9]*$ ]]; then
+              permitted_service_pids+=("$service_pid")
+            fi
+          done
+          assert_no_active_workloads "${permitted_service_pids[*]}"
+
+          # Missing headers: atomically hide only the confirmed running-kernel build symlink.
+          headers_path="/lib/modules/$(uname -r)/build"
+          headers_backup="${headers_path}.nvidia-converge-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          test -L "$headers_path"
+          test ! -e "$headers_backup"
+          test ! -L "$headers_backup"
+          headers_target="$(readlink -- "$headers_path")"
+          printf '%s\n' "$headers_target" > artifacts/fault-control/headers-target.before
+          restore_headers() {
+            if [ -e "$headers_backup" ] || [ -L "$headers_backup" ]; then
+              if [ -e "$headers_path" ] || [ -L "$headers_path" ]; then
+                return 1
+              fi
+              mv -- "$headers_backup" "$headers_path"
+            fi
+          }
+          trap 'restore_headers || true' EXIT HUP INT TERM
+          mv -- "$headers_path" "$headers_backup"
+          test ! -e "$headers_path"
+          test ! -L "$headers_path"
+          run_fault_doctor missing-headers kernel.headers.missing
+          restore_headers
+          trap - EXIT HUP INT TERM
+          test -L "$headers_path"
+          test "$(readlink -- "$headers_path")" = "$headers_target"
+          run_restoration_doctor missing-headers
+
+          # Module unloaded: retain exact NVIDIA module/service state and restore it on every exit.
+          mapfile -t original_modules < <(
+            awk '$1 ~ /^nvidia(_|$)/ {print $1}' /proc/modules | sort
+          )
+          test "${#original_modules[@]}" -gt 0
+          for module in "${original_modules[@]}"; do
+            case "$module" in
+              nvidia|nvidia_modeset|nvidia_drm|nvidia_uvm|nvidia_peermem|nvidia_fs) ;;
+              *) echo "unsupported NVIDIA module in controlled fixture: $module" >&2; exit 1 ;;
+            esac
+          done
+          mapfile -t module_unload_order < <(
+            "$PYTHON_BIN" -I - <<'PY'
+          from nvidia_converge.module_safety import nvidia_module_unload_order
+
+          print("\n".join(nvidia_module_unload_order()))
+          PY
+          )
+          test "${#module_unload_order[@]}" -gt 0
+          original_active_services=()
+          for service in "${service_candidates[@]}"; do
+            if systemctl is-active --quiet "$service"; then
+              original_active_services+=("$service")
+            fi
+          done
+          : > artifacts/fault-control/modules.before
+          for module in "${original_modules[@]}"; do
+            printf '%s\n' "$module" >> artifacts/fault-control/modules.before
+          done
+          : > artifacts/fault-control/services.before
+          for service in "${original_active_services[@]}"; do
+            printf '%s\n' "$service" >> artifacts/fault-control/services.before
+          done
+
+          module_was_loaded() {
+            local wanted="$1"
+            local module
+            for module in "${original_modules[@]}"; do
+              if [ "$module" = "$wanted" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          restore_module_state() {
+            local status=0
+            local module service
+            for module in nvidia nvidia_modeset nvidia_drm nvidia_uvm nvidia_peermem nvidia_fs; do
+              if module_was_loaded "$module" && ! grep -q "^${module} " /proc/modules; then
+                modprobe "$module" || status=1
+              fi
+            done
+            for service in "${original_active_services[@]}"; do
+              systemctl start "$service" || status=1
+            done
+            return "$status"
+          }
+          trap 'restore_module_state || true' EXIT HUP INT TERM
+          for service in "${original_active_services[@]}"; do
+            systemctl stop "$service"
+          done
+          assert_no_active_workloads
+          for module in "${module_unload_order[@]}"; do
+            if grep -q "^${module} " /proc/modules; then
+              modprobe --remove "$module"
+            fi
+          done
+          test ! -e /sys/module/nvidia
+          run_fault_doctor module-unloaded module.not-loaded
+          restore_module_state
+          trap - EXIT HUP INT TERM
+          mapfile -t restored_modules < <(
+            awk '$1 ~ /^nvidia(_|$)/ {print $1}' /proc/modules | sort
+          )
+          printf '%s\n' "${restored_modules[@]}" > artifacts/fault-control/modules.after
+          cmp artifacts/fault-control/modules.before artifacts/fault-control/modules.after
+          for service in "${original_active_services[@]}"; do
+            systemctl is-active --quiet "$service"
+          done
+          run_restoration_doctor module-unloaded
+
+          # Driver mismatch: change only the desired branch and keep the live audit untouched.
+          "$PYTHON_BIN" -I - <<'PY'
+          from dataclasses import asdict
+          import json
+          import os
+          from pathlib import Path
+
+          from nvidia_converge.desired import load_desired
+
+          source = Path(os.environ["DESIRED_PATH"])
+          payload = {"desired": asdict(load_desired(source))}
+          report = json.loads(
+              Path("artifacts/reports/doctor.json").read_text(encoding="utf-8")
+          )
+          observed = str(report["audit"]["module"]["version"])
+          observed_major = observed.split(".", 1)[0]
+          alternate_major = "595" if observed_major != "595" else "580"
+          payload["desired"]["driver"] = f"{alternate_major}-open"
+          destination = Path(os.environ["QUALIFICATION_ROOT"]) / "driver-mismatch-desired.json"
+          destination.write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          destination.chmod(0o400)
+          PY
+          sha256sum "$QUALIFICATION_ROOT/driver-mismatch-desired.json" \
+            > artifacts/fault-control/driver-mismatch-desired.sha256
+          run_fault_doctor \
+            driver-mismatch \
+            driver.version-mismatch \
+            "$QUALIFICATION_ROOT/driver-mismatch-desired.json"
+          run_restoration_doctor driver-mismatch
+
+          # Runtime missing: mask every resolved toolkit executable in a private mount namespace.
+          mapfile -t runtime_paths < <(
+            for directory in /usr/sbin /usr/bin /sbin /bin; do
+              for executable_name in nvidia-ctk nvidia-container-runtime; do
+                executable="$directory/$executable_name"
+                if [ -x "$executable" ]; then
+                  readlink -f -- "$executable"
+                fi
+              done
+            done | sort -u
+          )
+          test "${#runtime_paths[@]}" -gt 0
+          : > artifacts/fault-control/runtime.before
+          for executable in "${runtime_paths[@]}"; do
+            test -f "$executable"
+            stat -Lc '%n %i %u %g %a %s' "$executable" >> artifacts/fault-control/runtime.before
+            sha256sum -- "$executable" >> artifacts/fault-control/runtime.before
+          done
+          set +e
+          unshare --mount --propagation private bash -Eeuo pipefail -c '
+            python_bin="$1"
+            desired_path="$2"
+            report_path="$3"
+            shift 3
+            export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+            for executable in "$@"; do
+              mount --bind /dev/null "$executable"
+            done
+            test -z "$(command -v nvidia-ctk || true)"
+            test -z "$(command -v nvidia-container-runtime || true)"
+            "$python_bin" -I -m nvidia_converge doctor \
+              --desired "$desired_path" --out "$report_path"
+          ' fault-runtime \
+            "$PYTHON_BIN" "$DESIRED_PATH" \
+            "$WORKSPACE/artifacts/reports/doctor-runtime-missing.json" \
+            "${runtime_paths[@]}"
+          runtime_status=$?
+          set -e
+          validate_fault_report \
+            artifacts/reports/doctor-runtime-missing.json \
+            container-toolkit.missing \
+            "$runtime_status"
+          : > artifacts/fault-control/runtime.after
+          for executable in "${runtime_paths[@]}"; do
+            stat -Lc '%n %i %u %g %a %s' "$executable" >> artifacts/fault-control/runtime.after
+            sha256sum -- "$executable" >> artifacts/fault-control/runtime.after
+          done
+          cmp artifacts/fault-control/runtime.before artifacts/fault-control/runtime.after
+          run_restoration_doctor runtime-missing
+
+          # Fabric Manager is applicable only to the FM-required desired profile.
+          if [ "$MATRIX_ID" = fabric-manager ]; then
+            systemctl is-active --quiet nvidia-fabricmanager
+            fm_enabled_before="$(systemctl is-enabled nvidia-fabricmanager)"
+            restore_fabric_manager() {
+              systemctl start nvidia-fabricmanager
+            }
+            trap 'restore_fabric_manager || true' EXIT HUP INT TERM
+            systemctl stop nvidia-fabricmanager
+            test "$(systemctl is-active nvidia-fabricmanager || true)" = inactive
+            run_fault_doctor fabric-manager-inactive fabric-manager.inactive
+            restore_fabric_manager
+            trap - EXIT HUP INT TERM
+            systemctl is-active --quiet nvidia-fabricmanager
+            test "$(systemctl is-enabled nvidia-fabricmanager)" = "$fm_enabled_before"
+            run_restoration_doctor fabric-manager-inactive
+          fi
+          BASH
+          sudo chown -R "$runner_uid:$runner_gid" \
+            artifacts/fault-control artifacts/restoration artifacts/reports
+
+      - name: Independently restore controlled-fault pre-state
+        id: fault_cleanup
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' && steps.doctor.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          sudo env \
+            DESIRED_PATH="$QUALIFICATION_DESIRED" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            MATRIX_ID="${{ matrix.id }}" \
+            WORKSPACE="$PWD" \
+            PYTHON_BIN="$QUALIFICATION_PYTHON" \
+            bash -Eeuo pipefail <<'BASH'
+          cd "$WORKSPACE"
+          mkdir -p artifacts/restoration
+          lock_dir=/run/nvidia-converge
+          lock_path="$lock_dir/operation.lock"
+          quarantine_marker="$lock_dir/fault-cleanup-required"
+          quarantine() {
+            printf '%s\n' \
+              "cleanup-failed run=${GITHUB_RUN_ID} attempt=${GITHUB_RUN_ATTEMPT} matrix=${MATRIX_ID}" \
+              > "$quarantine_marker"
+            chmod 600 "$quarantine_marker"
+          }
+          trap quarantine ERR
+          trap 'quarantine; exit 1' HUP INT TERM
+
+          test "$(stat -c '%U:%a' "$lock_dir")" = "root:700"
+          test -f "$lock_path"
+          test ! -L "$lock_path"
+          test "$(stat -c '%U:%a:%h' "$lock_path")" = "root:600:1"
+          exec {operation_lock_fd}>>"$lock_path"
+          flock --exclusive --nonblock "$operation_lock_fd"
+
+          headers_path="/lib/modules/$(uname -r)/build"
+          headers_backup="${headers_path}.nvidia-converge-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [ -e "$headers_backup" ] || [ -L "$headers_backup" ]; then
+            test ! -e "$headers_path"
+            test ! -L "$headers_path"
+            mv -- "$headers_backup" "$headers_path"
+          fi
+          if [ -f artifacts/fault-control/headers-target.before ]; then
+            test -L "$headers_path"
+            test "$(readlink -- "$headers_path")" = \
+              "$(cat artifacts/fault-control/headers-target.before)"
+          fi
+
+          if [ -s artifacts/fault-control/modules.before ]; then
+            mapfile -t original_modules < artifacts/fault-control/modules.before
+            for module in nvidia nvidia_modeset nvidia_drm nvidia_uvm nvidia_peermem nvidia_fs; do
+              if printf '%s\n' "${original_modules[@]}" | grep -qx "$module" \
+                && ! grep -q "^${module} " /proc/modules; then
+                modprobe "$module"
+              fi
+            done
+            mapfile -t restored_modules < <(
+              awk '$1 ~ /^nvidia(_|$)/ {print $1}' /proc/modules | sort
+            )
+            test "$(printf '%s\n' "${restored_modules[@]}")" = \
+              "$(printf '%s\n' "${original_modules[@]}")"
+          fi
+
+          service_candidates=(nvidia-fabricmanager nvidia-persistenced nvidia-powerd)
+          original_active_services=()
+          if [ -f artifacts/fault-control/services.before ]; then
+            mapfile -t original_active_services < artifacts/fault-control/services.before
+            for service in "${service_candidates[@]}"; do
+              if printf '%s\n' "${original_active_services[@]}" | grep -qx "$service"; then
+                systemctl start "$service"
+                systemctl is-active --quiet "$service"
+              elif systemctl is-active --quiet "$service"; then
+                systemctl stop "$service"
+              fi
+            done
+          fi
+
+          "$PYTHON_BIN" -I -m nvidia_converge doctor \
+            --desired "$DESIRED_PATH" \
+            --out artifacts/restoration/final-cleanup.json
+          rm -f -- "$quarantine_marker"
+          trap - ERR HUP INT TERM
+          BASH
+
+      - name: Restore controlled-fault artifact ownership
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' }}
+        shell: bash
+        run: |
+          for path in artifacts/fault-control artifacts/restoration artifacts/reports; do
+            if [ -e "$path" ]; then
+              sudo chown -R "$(id -u):$(id -g)" "$path"
+            fi
+          done
+
+      - name: Rollback
+        id: rollback
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' && steps.retain_snapshot.outcome == 'success' && steps.install.outcome != 'skipped' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          test -s artifacts/reports/rollback-snapshot-path.txt
+          snapshot="$(cat artifacts/reports/rollback-snapshot-path.txt)"
+          root_report="${REPORT_ROOT}/${REPORT_PREFIX}-rollback.json"
+          set +e
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge rollback --desired "$QUALIFICATION_DESIRED" --snapshot "$snapshot" --apply --allow-disruption --out "$root_report"
+          status=$?
+          set -e
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$root_report" artifacts/reports/rollback.json
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "${root_report}.journal.jsonl" artifacts/reports/rollback.journal.jsonl
+          exit "$status"
+
+      - name: Restore pre-policy baseline
+        id: policy_rollback
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' && steps.retain_policy_snapshot.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          test -s artifacts/reports/policy-rollback-snapshot-path.txt
+          snapshot="$(cat artifacts/reports/policy-rollback-snapshot-path.txt)"
+          root_report="${REPORT_ROOT}/${REPORT_PREFIX}-policy-rollback.json"
+          set +e
+          sudo "$QUALIFICATION_PYTHON" -I -m nvidia_converge rollback --desired "$QUALIFICATION_DESIRED" --snapshot "$snapshot" --apply --allow-disruption --out "$root_report"
+          status=$?
+          set -e
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$root_report" artifacts/reports/policy-rollback.json
+          sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "${root_report}.journal.jsonl" artifacts/reports/policy-rollback.journal.jsonl
+          exit "$status"
+
+      - name: Remove trusted qualification runtime
+        id: qualification_cleanup
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' && steps.qualification.outcome != 'skipped' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          expected_root="/opt/nvidia-converge/qualification/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.id }}"
+          test "$QUALIFICATION_ROOT" = "$expected_root"
+          if sudo test -e "$QUALIFICATION_ROOT" \
+            || sudo test -L "$QUALIFICATION_ROOT"; then
+            sudo rm -rf -- "$QUALIFICATION_ROOT"
+          fi
+          sudo test ! -e "$QUALIFICATION_ROOT"
+          sudo test ! -L "$QUALIFICATION_ROOT"
+
+      - name: Capture post-state
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/post
+          uname -a | tee artifacts/post/uname.txt
+          if command -v nvidia-smi; then nvidia-smi -q > artifacts/post/nvidia-smi-q.txt || true; fi
+          if command -v dkms; then dkms status > artifacts/post/dkms-status.txt || true; fi
+          if command -v modinfo; then modinfo nvidia > artifacts/post/modinfo-nvidia.txt || true; fi
+          for log in /var/log/apt/history.log /var/log/dnf.log /var/log/yum.log /var/log/zypp/history; do
+            if [ -r "$log" ]; then cp "$log" "artifacts/post/$(basename "$log")"; fi
+          done
+
+      - name: Assert apply sequence passed after cleanup
+        if: ${{ always() && env.QUALIFICATION_APPLY == 'true' }}
+        shell: bash
+        run: |
+          test "${{ steps.qualification.outcome }}" = success
+          test "${{ steps.lock.outcome }}" = success
+          test "${{ steps.retain_policy_snapshot.outcome }}" = success
+          test "${{ steps.snapshot.outcome }}" = success
+          test "${{ steps.retain_snapshot.outcome }}" = success
+          test "${{ steps.install.outcome }}" = success
+          test "${{ steps.verify.outcome }}" = success
+          test "${{ steps.doctor.outcome }}" = success
+          test "${{ steps.doctor_faults.outcome }}" = success
+          test "${{ steps.fault_cleanup.outcome }}" = success
+          test "${{ steps.rollback.outcome }}" = success
+          test "${{ steps.policy_rollback.outcome }}" = success
+          test "${{ steps.qualification_cleanup.outcome }}" = success
+
+      - name: Export privacy-minimized integration attestation
+        id: export-attestation
+        if: always()
+        env:
+          MATRIX_ID: ${{ matrix.id }}
+        run: |
+          set -Eeuo pipefail
+          if [[ ! -d artifacts || -L artifacts ]]; then
+            echo "sanitized export parent is missing or unsafe" >&2
+            exit 2
+          fi
+          chmod 0700 artifacts
+          .venv/bin/python scripts/export_integration_attestation.py \
+            --source artifacts \
+            --output artifacts/export \
+            --matrix-id "$MATRIX_ID" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --qualification-wheel-name "$QUALIFICATION_WHEEL_NAME" \
+            --qualification-wheel-sha256 "$QUALIFICATION_WHEEL_SHA256"
+
+      - name: Verify exact sanitized upload handoff
+        id: verify-attestation
+        if: ${{ always() && steps.export-attestation.outcome == 'success' }}
+        env:
+          MATRIX_ID: ${{ matrix.id }}
+        run: |
+          .venv/bin/python scripts/export_integration_attestation.py \
+            --verify-only \
+            --output artifacts/export \
+            --matrix-id "$MATRIX_ID" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --qualification-wheel-name "$QUALIFICATION_WHEEL_NAME" \
+            --qualification-wheel-sha256 "$QUALIFICATION_WHEEL_SHA256"
+
+      - name: Upload integration artifacts
+        id: upload
+        if: ${{ always() && steps.verify-attestation.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gpu-integration-${{ matrix.id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/export/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record observed promotion identifiers
+        if: ${{ always() && steps.upload.outcome == 'success' }}
+        shell: bash
+        run: |
+          {
+            echo "### Promotion observation"
+            echo "- matrix_id: ${{ matrix.id }}"
+            echo "- workflow_run_id: ${{ github.run_id }}"
+            echo "- workflow_run_attempt: ${{ github.run_attempt }}"
+            echo "- head_sha: ${{ github.sha }}"
+            echo "- artifact_id: ${{ steps.upload.outputs.artifact-id }}"
+            echo "- artifact_url: ${{ steps.upload.outputs.artifact-url }}"
+            echo "- artifact_digest: ${{ steps.upload.outputs.artifact-digest }}"
+            echo "- qualification_wheel_name: $QUALIFICATION_WHEEL_NAME"
+            echo "- qualification_wheel_sha256: $QUALIFICATION_WHEEL_SHA256"
+            echo "- workflow_job_id and completed_at must be read from the Actions Jobs API after this job completes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  validate-attestations:
+    name: Validate retained qualification reports
+    if: ${{ always() }}
+    needs: gpu
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up exact validation Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+          architecture: x64
+
+      - name: Install locked validation tooling
+        run: |
+          python -m pip install \
+            --require-hashes --no-deps \
+            --requirement requirements/release.lock
+
+      - name: Download sanitized integration attestations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: gpu-integration-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: attestation-artifacts
+
+      - name: Validate retained report schemas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import jsonschema
+
+          from nvidia_converge.schemas import load_schema, strict_format_checker
+
+          root = Path("attestation-artifacts")
+          artifact_directories = sorted(path for path in root.iterdir() if path.is_dir())
+          if len(artifact_directories) != 6:
+              raise SystemExit(
+                  "expected six sanitized matrix artifacts, found "
+                  f"{len(artifact_directories)}"
+              )
+          schema = load_schema("report")
+          for artifact in artifact_directories:
+              reports = sorted((artifact / "reports").glob("*.json"))
+              reports += sorted((artifact / "restoration").glob("*.json"))
+              if not reports:
+                  raise SystemExit(f"no retained reports found in {artifact}")
+              for report in reports:
+                  with report.open(encoding="utf-8") as handle:
+                      jsonschema.validate(
+                          json.load(handle),
+                          schema,
+                          format_checker=strict_format_checker(),
+                      )
+                  print(f"validated {report}")
+          PY
+
+      - name: Require every GPU matrix job to pass
+        env:
+          GPU_RESULT: ${{ needs.gpu.result }}
+        run: |
+          if [ "$GPU_RESULT" != success ]; then
+            echo "one or more GPU qualification jobs failed" >&2
+            exit 2
+          fi

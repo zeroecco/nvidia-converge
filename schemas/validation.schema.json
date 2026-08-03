@@ -25,18 +25,24 @@
   "$defs": {
     "desired": {
       "type": "object",
-      "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "fabric_manager", "mig", "kernel_policy"],
+      "required": ["role", "driver", "cuda_compat", "secure_boot", "container_runtime", "container_test_image", "fabric_manager", "mig", "mig_profile", "kernel_policy"],
       "additionalProperties": false,
       "properties": {
         "role": {"type": "string", "enum": ["compute"]},
         "driver": {"type": "string", "pattern": "^\\d+(?:-open|\\.\\d+(?:\\.\\d+)?)?$"},
-        "cuda_compat": {"type": "string", "pattern": "^\\d+\\.\\d+$"},
-        "secure_boot": {"type": "string", "enum": ["signed", "unsigned", "disabled"]},
+        "cuda_compat": {"type": "string", "enum": ["none"]},
+        "secure_boot": {"type": "string", "enum": ["signed", "disabled"]},
         "container_runtime": {"type": "string", "enum": ["docker"]},
+        "container_test_image": {"type": "string", "maxLength": 212, "pattern": "^nvidia/cuda:\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9._]+)*-devel(?:-[A-Za-z0-9._]+)*@sha256:[a-f0-9]{64}$"},
         "fabric_manager": {"type": "boolean"},
         "mig": {"type": "string", "enum": ["disabled", "enabled"]},
+        "mig_profile": {"type": "string", "enum": ["none", "full"]},
         "kernel_policy": {"type": "string", "enum": ["pin-compatible"]}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"mig": {"const": "enabled"}}}, "then": {"properties": {"mig_profile": {"const": "full"}}}},
+        {"if": {"properties": {"mig": {"const": "disabled"}}}, "then": {"properties": {"mig_profile": {"const": "none"}}}}
+      ]
     }
   }
 }
